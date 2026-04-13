@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Tests on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run unit tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+
+      - name: Run end-to-end demo
+        env:
+          PYTHONPATH: src
+        run: python -m life_science_integrity_benchmark.cli demo
+
+      - name: Verify release artifacts exist
+        run: |
+          test -f artifacts/sample_release/benchmark_v1.jsonl
+          test -f artifacts/sample_release/summary.json
+          test -f artifacts/sample_release/leakage_report.json
+          test -f artifacts/sample_release/task_a_baselines.json
+          test -f artifacts/sample_release/task_b_baseline.json
+          test -f artifacts/sample_release/experiment_report.md
+          test -f artifacts/site/index.html
+          test -f artifacts/site/policy.html
+
+      - name: Verify leakage audit passed
+        env:
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import json, sys
+          with open("artifacts/sample_release/leakage_report.json") as f:
+              report = json.load(f)
+          if not report.get("passed"):
+              print("Leakage audit failed:", json.dumps(report, indent=2))
+              sys.exit(1)
+          print("Leakage audit passed.")
+          PY

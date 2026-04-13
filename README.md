@@ -1,33 +1,71 @@
-# Life-Science Integrity Signals Benchmark v1
+# Life-Science Integrity Signals Benchmark
 
-This repository contains a runnable scaffold for a research-integrity triage benchmark and a read-only evidence browser. The benchmark is designed to surface papers that may merit further scrutiny. It is explicitly not a fraud detector and it does not determine misconduct.
+[![CI](https://github.com/jang1563/Retracted_concern_DB/actions/workflows/ci.yml/badge.svg)](https://github.com/jang1563/Retracted_concern_DB/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.11%20%7C%203.13-blue.svg)](#)
 
-## What is included
+A **triage-benchmark harness** for ranking life-science papers for human integrity review.
 
-- A reproducible benchmark-core build pipeline
-- Rights-aware source joining and label derivation
-- Horizon-based Task A targets for early-warning ranking
-- Task B evidence aggregation and tiering
-- Leakage auditing with explicit feature cutoff tracking for Task A
-- Time splits plus grouped holdout split manifests for author clusters, venues, and publishers
-- Baseline model hooks for metadata, abstract text, and metadata+text fusion
-- A static evidence browser with policy, change log, and dispute workflow pages
-- An internal-only curation queue artifact for non-notice external signals
-- A restartable local snapshot ingest pipeline for OpenAlex bulk shards, local official-notice exports, and PubMed DOI joins
-- Provider-aware notice parsing for generic rows plus Crossref/Crossmark-style nested updates
-- A benchmark experiment report generator
-- Sample synthetic source data so the full stack can run offline
-- Vendor-archive collection and raw-snapshot staging helpers for OpenAlex, Crossref, Retraction Watch, and PubMed
+> **This is not a fraud detector.** It does not determine misconduct. It ranks papers for human reviewers and aggregates evidence with explicit rights and provenance handling. Every downstream decision requires a named human reviewer. See [ETHICS.md](ETHICS.md).
 
-## Quickstart
+Status: **v0.1 scaffold.** The full stack runs end-to-end on synthetic sample data — 20 unit tests pass, the `demo` pipeline produces a complete release + static site in seconds, and a `leakage_report.json` clean of all 11 banned post-publication field classes. A real-data release built from OpenAlex, Retraction Watch, and PubMed is in progress; real numbers will land in a tagged release once the ingest completes. See [docs/results.md](docs/results.md) for the current demo numbers.
 
-Create the sample release and site:
+---
+
+## Why This Exists
+
+Research-integrity signals — retractions, corrections, expressions of concern, paper-mill watchlists, community flags — arrive **late**, **fragmented across sources**, and **carry real reputational consequences** when mishandled. Most existing tooling either (a) aggregates signals without rights controls, (b) produces public "risk scores" that get quoted out of context, or (c) ignores leakage between publication-time features and post-publication evidence.
+
+This repository is an attempt at the opposite: a **benchmark and protocol** for evaluating triage models that are rights-aware, leakage-audited, and governance-gated by design.
+
+## What Is In The Box
+
+1. **Two task definitions.**
+   - **Task A** — publication-time ranking. Predict whether a paper will receive a public integrity signal or official notice within a `12m` or `36m` horizon, using only features available at publication time. [docs/evaluation_protocol.md](docs/evaluation_protocol.md)
+   - **Task B** — snapshot-time evidence aggregation. Assign `notice_status` and issue tags from provenance-permitted evidence visible at the snapshot date.
+2. **Leakage-audited splits.** Time-based primary split, grouped holdouts for author cluster / venue / publisher, a `noisy-date` analysis split, and an `audit-leakage` CLI step that checks feature cutoff dates.
+3. **Rights-aware ingest.** Collectors for OpenAlex bulk, Retraction Watch, PubMed baseline+updatefiles, and optional Crossref Metadata Plus, staged through a vendor archive → raw snapshot → canonical release pipeline. Link-only sources stay link-only. [docs/source_rights_matrix.md](docs/source_rights_matrix.md)
+4. **A read-only evidence browser.** Static site with policy, change log, dispute workflow, and adjudication protocol pages. Auto-publishes official notices; curator-gates non-notice signals. [docs/governance_policy.md](docs/governance_policy.md)
+5. **Offline-first demo.** The full pipeline runs on synthetic sample data with zero network calls, so you can reproduce the scaffold end-to-end in a laptop-minute.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Collect["Collect (rights-aware)"]
+    OA[OpenAlex bulk]
+    RW[Retraction Watch]
+    PM[PubMed baseline/updates]
+    CR[Crossref Metadata Plus<br/><i>optional</i>]
+  end
+  Collect --> VA[Vendor archive]
+  VA --> RAW[Raw snapshot]
+  RAW --> REG[register-snapshot]
+  REG --> ING[ingest-snapshot]
+  ING --> MAT[materialize-canonical]
+  MAT --> CORE[build-core]
+  CORE --> SPL[build-splits]
+  CORE --> AUD[audit-leakage]
+  SPL --> TA[train-task-a]
+  SPL --> TB[train-task-b]
+  CORE --> ADJ[make-adjudication-set]
+  CORE --> SITE[build-site]
+  SITE -. auto-publish .-> NOT[Official notices]
+  SITE -. curator-gated .-> EXT[External signals]
+  TA --> REPORT[build-report]
+  TB --> REPORT
+  AUD --> REPORT
+```
+
+## 60-Second Demo
+
+Synthetic sample data ships with the repo. Produce a full release + static site offline:
 
 ```bash
 PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli demo
 ```
 
-Or run the steps separately:
+Or run each stage separately:
 
 ```bash
 PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli bootstrap-sample
@@ -41,175 +79,87 @@ PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli build-site
 PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli build-report
 ```
 
-Register, ingest, and materialize a local full-corpus snapshot:
+Artifacts land in [artifacts/sample_release/](artifacts/) and [artifacts/site/](artifacts/).
 
-```bash
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli scaffold-real-ingest --raw-dir data/raw/my_snapshot
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli register-snapshot --snapshot-id my_snapshot --raw-root data/raw/my_snapshot --source-family openalex_notices
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli ingest-snapshot --snapshot-id my_snapshot --collector openalex_bulk
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli ingest-snapshot --snapshot-id my_snapshot --collector local_notice_export
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli ingest-snapshot --snapshot-id my_snapshot --collector pubmed_index
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli materialize-canonical --snapshot-id my_snapshot
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli validate-snapshot --snapshot-id my_snapshot --release-dir artifacts/real_release
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli --source-dir data/normalized/my_snapshot/canonical --release-dir artifacts/real_release --site-dir artifacts/real_site build-core
-```
+Real-data and HPC collection workflows are documented in [docs/operations.md](docs/operations.md).
 
-If you want the ingest registry and normalized shards to live outside the repo checkout, add `--root-dir`:
+## What The Demo Produces
 
-```bash
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli --root-dir /tmp/lsib-runtime register-snapshot --snapshot-id my_snapshot --raw-root /tmp/raw_snapshot --source-family openalex_notices
-```
+A clean `demo` run on the 16-record synthetic corpus produces:
 
-The legacy compatibility wrapper still exists if you want flat `articles.jsonl` files:
+- **Benchmark release** — `benchmark_v1.jsonl` + `.csv`, 16 records, snapshot 2026-04-09, 6 public + 5 curator-review + 5 none-known.
+- **Leakage audit** — **PASS** with zero violations across 11 banned field classes and 14 publication-time Task A features. See [leakage_report.json](artifacts/sample_release/leakage_report.json) after running the demo.
+- **14 split manifests** — primary time split + author-cluster / venue / publisher holdouts × Task A 12m, 36m, Task B.
+- **Task A baselines** — 3 models × 2 horizons × all metrics (AUPRC, Recall@1%, Recall@5%, ECE, subfield-AUPRC). On the 36m horizon: metadata_logistic AUPRC=0.92, text hashing 0.81, fusion 0.92.
+- **Task B baseline** — keyword-rules-over-provenance; notice accuracy 1.00, tag macro-F1 0.98, provenance coverage 0.69 on the synthetic set.
+- **Evidence browser site** — landing page with search, governance disclaimer, per-record pages, policy, and change log; non-notice signals are held in `internal_curation_queue.json` off the public site.
+- **Experiment report** — both Markdown and JSON.
 
-```bash
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli normalize-real-sources --raw-dir data/raw_real --normalized-dir data/sources_real
-```
+Full numbers, tables, and interpretation: [docs/results.md](docs/results.md).
 
-Build an ingest-ready raw snapshot from a vendor archive:
+> These are **synthetic-data protocol numbers** — they prove every stage of the pipeline runs and produces the expected artifact shape, not that any particular model is good. Real-data results will replace them in a future release.
 
-```bash
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli validate-vendor-archive --vendor-root /data/vendor_archive --snapshot-label 2026-03-freeze
-PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli stage-vendor-archive --vendor-root /data/vendor_archive --raw-root /data/raw_snapshot --snapshot-label 2026-03-freeze
-```
+## Governance And Rights (Hard Rules)
 
-Collection wrappers for upstream sources live under `scripts/raw_snapshot/`.
-If you already have a populated `vendor_archive`, you can run validation, staging, and the isolated local dry run in one command:
+These are guardrails, not defaults. They are not optional in any release of this benchmark or in public-facing work built on it.
 
-```bash
-./scripts/raw_snapshot/run_vendor_archive_pipeline.sh /data/vendor_archive /data/raw_snapshot /tmp/lsib-vendor-dryrun 2026-03-freeze
-```
+- Negative state is **`none_known_at_snapshot`**, never "clean." Absence of a signal does not imply integrity.
+- Public site pages **never** display numeric risk scores.
+- Official notices **may** auto-publish with source-linked factual summaries.
+- Non-notice external signals **require curator review** before public display.
+- Extension signals are **link-only** unless explicit redistribution rights exist.
+- `year_imputed` publication dates are **excluded** from the primary Task A benchmark and routed to a noisy-date analysis split.
+- Every release carries a **snapshot date, change log, and dispute contact**.
 
-If you want to run collection + staging + isolated local dry run as one monthly-freeze workflow:
+Full governance: [docs/governance_policy.md](docs/governance_policy.md). Ethics and non-goals: [ETHICS.md](ETHICS.md).
 
-```bash
-cp env/raw_snapshot.env.example /tmp/raw_snapshot.env
-$EDITOR /tmp/raw_snapshot.env
-export RAW_SNAPSHOT_ENV_FILE="/tmp/raw_snapshot.env"
+## Documentation Map
 
-# On module-based HPC systems, aws is commonly provided as a module:
-# module load awscli/2.2.14
+| Document | Purpose |
+| --- | --- |
+| [docs/data_card.md](docs/data_card.md) | Unit of analysis, scope, labels, leakage controls |
+| [docs/evaluation_protocol.md](docs/evaluation_protocol.md) | Task A / Task B, splits, metrics, audit requirements |
+| [docs/governance_policy.md](docs/governance_policy.md) | Public display and curator rules |
+| [docs/source_rights_matrix.md](docs/source_rights_matrix.md) | What can be redistributed and how |
+| [docs/adjudication_protocol.md](docs/adjudication_protocol.md) | Review policy for weak labels and wording |
+| [docs/raw_source_schema.md](docs/raw_source_schema.md) | Raw snapshot layout |
+| [docs/real_data_source_examples.md](docs/real_data_source_examples.md) | Concrete examples per source family |
+| [docs/results.md](docs/results.md) | Demo-run numbers and artifact shapes |
+| [docs/operations.md](docs/operations.md) | Real-data collection, HPC, release builds |
+| [docs/cayuga_overnight_run.md](docs/cayuga_overnight_run.md) | HPC rehearsal runbook |
+| [ETHICS.md](ETHICS.md) | Intended use and non-goals |
+| [SECURITY.md](SECURITY.md) | Responsible disclosure |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute (governance-gated) |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Expected behavior |
 
-./scripts/raw_snapshot/check_collection_runtime.sh
-./scripts/raw_snapshot/collect_monthly_freeze.sh /data/vendor_archive /data/raw_snapshot /tmp/lsib-freeze-run 2026-03-freeze
-```
+## Project Layout
 
-If you want to stay fully free/open-data-only and skip Crossref Metadata Plus:
+- [src/life_science_integrity_benchmark/](src/life_science_integrity_benchmark/) — package code
+- [scripts/raw_snapshot/](scripts/raw_snapshot/) — vendor-archive collection, validation, staging helpers
+- [scripts/cayuga/](scripts/cayuga/) — HPC submission and monitoring helpers
+- [docs/](docs/) — data card, evaluation protocol, rights matrix, governance, runbooks
+- [tests/](tests/) — dataset logic, auditing, modeling, site generation
 
-```bash
-cp env/raw_snapshot.env.example /tmp/raw_snapshot.env
-$EDITOR /tmp/raw_snapshot.env
-export RAW_SNAPSHOT_ENV_FILE="/tmp/raw_snapshot.env"
-export CROSSREF_SOURCE_MODE="skip"
+## Model Backends
 
-./scripts/raw_snapshot/check_collection_runtime.sh
-./scripts/raw_snapshot/collect_open_data_freeze.sh /data/vendor_archive /data/raw_snapshot /tmp/lsib-freeze-run 2026-03-freeze
-```
+The repository runs fully offline with built-in pure-Python baselines. The abstract-text encoder baseline can optionally use a locally cached Transformer model; the metadata baseline can optionally use XGBoost if available. Neither is required for the default demo path.
 
-`collect_open_data_freeze.sh` defaults to `symlink` staging mode to keep scratch usage low. Pass `copy` as the fifth argument if you need a physically separate copy.
+## Status And Roadmap
 
-To watch the HPC public-source collection job:
+- [x] End-to-end scaffold with synthetic sample data
+- [x] Rights-aware vendor-archive → raw-snapshot → canonical release pipeline
+- [x] Leakage-audited Task A / Task B split construction
+- [x] Read-only evidence browser with dispute workflow
+- [x] HPC (Cayuga) rehearsal runbook
+- [ ] First real-data release (OpenAlex + Retraction Watch + PubMed, Crossref skipped)
+- [ ] Baseline numbers against the real-data release
+- [ ] Adjudicated subset with double-review consensus fields
+- [ ] v0.2 tagged release with Zenodo DOI
 
-```bash
-./scripts/cayuga/watch_public_vendor_collection_from_local.sh <user>@<hpc-login> <hpc-scratch-root>/lsib/<run-id> 60 10
-```
+## License
 
-## HPC overnight rehearsal
+Apache License 2.0 — see [LICENSE](LICENSE). License covers the code and the structure of releases produced by this repository. Individual source fields redistributed inside a release remain subject to their upstream licenses; see the rights matrix.
 
-For the current HPC rehearsal workflow, use the helper scripts in `scripts/cayuga/` and the runbook in `docs/cayuga_overnight_run.md`.
+## Citation
 
-Typical sequence:
-
-```bash
-REMOTE_HOST="<user>@<hpc-login>"
-RUN_ROOT="<hpc-scratch-root>/lsib/<run-id>"
-
-./scripts/cayuga/sync_repo_to_cayuga.sh "$REMOTE_HOST" "$RUN_ROOT"
-ssh "$REMOTE_HOST"
-cd "$RUN_ROOT/repo"
-./scripts/cayuga/setup_run_root.sh "$RUN_ROOT"
-./scripts/cayuga/submit_overnight.sh "$RUN_ROOT"
-```
-
-This submits only the `preflight` and `sample_stress` rehearsal jobs. The real-data ingest job is rendered but intentionally not submitted until raw snapshot files exist under `raw/real_snapshot/`.
-
-If you want to do sync + remote setup + runtime check + overnight submission from the local machine in one step:
-
-```bash
-./scripts/cayuga/launch_overnight_from_local.sh "$REMOTE_HOST" "$RUN_ROOT"
-```
-
-When raw files are ready on Cayuga, check the snapshot layout and submit the real ingest job with:
-
-```bash
-LOCAL_RAW_ROOT="/path/to/local/raw_snapshot"
-
-./scripts/cayuga/scaffold_local_raw_snapshot.sh "$LOCAL_RAW_ROOT"
-./scripts/cayuga/check_local_raw_snapshot.sh "$LOCAL_RAW_ROOT"
-./scripts/cayuga/inventory_local_raw_snapshot.sh "$LOCAL_RAW_ROOT"
-./scripts/cayuga/run_local_real_snapshot_pipeline.sh "$LOCAL_RAW_ROOT" /tmp/lsib-real-dryrun
-./scripts/cayuga/sync_real_snapshot_to_cayuga.sh "$REMOTE_HOST" "$RUN_ROOT" "$LOCAL_RAW_ROOT"
-./scripts/cayuga/check_real_snapshot_ready.sh "$RUN_ROOT"
-./scripts/cayuga/submit_real_ingest.sh "$RUN_ROOT"
-```
-
-The local dry-run helper now keeps manifests and normalized shards under `/tmp/lsib-real-dryrun/runtime_root`, so it does not write ingest state into the repo checkout.
-
-If your source files are mixed together in a downloads folder first, you can classify and stage them with:
-
-```bash
-MIXED_SOURCE_ROOT="/path/to/downloads_or_exports"
-./scripts/cayuga/classify_mixed_sources.sh "$MIXED_SOURCE_ROOT"
-./scripts/cayuga/review_unknown_classification.sh "$MIXED_SOURCE_ROOT"
-./scripts/cayuga/write_unknown_override_template.sh "$MIXED_SOURCE_ROOT/source_classification.tsv"
-./scripts/cayuga/stage_mixed_sources_into_raw_snapshot.sh "$MIXED_SOURCE_ROOT" "$LOCAL_RAW_ROOT" copy "$MIXED_SOURCE_ROOT/source_classification.tsv" "$MIXED_SOURCE_ROOT/classification_overrides.tsv"
-```
-
-To watch a submitted real ingest job from the local machine:
-
-```bash
-./scripts/cayuga/watch_real_ingest_from_local.sh "$REMOTE_HOST" "$RUN_ROOT" 60 20
-```
-
-Or, from the local machine:
-
-```bash
-./scripts/cayuga/launch_real_ingest_from_local.sh "$REMOTE_HOST" "$RUN_ROOT" "$LOCAL_RAW_ROOT"
-```
-
-For next-morning review, collect a single text summary with:
-
-```bash
-./scripts/cayuga/collect_morning_status.sh "$RUN_ROOT"
-```
-
-To cancel any recorded Cayuga jobs from the cluster side:
-
-```bash
-./scripts/cayuga/cancel_recorded_jobs.sh "$RUN_ROOT"
-```
-
-Artifacts are written to:
-
-- `artifacts/sample_release/`
-- `artifacts/site/`
-
-## Project layout
-
-- `src/life_science_integrity_benchmark/`: package code
-- `scripts/raw_snapshot/`: vendor-archive collection, validation, and raw-snapshot staging helpers
-- `docs/`: data card, rights matrix, evaluation protocol, raw-source schema, and governance policy
-- `tests/`: unit tests for dataset logic, auditing, modeling, and site generation
-
-## Important defaults
-
-- Negative state is `none_known_at_snapshot`, never "clean"
-- Public site pages never show numeric risk scores
-- Official notices can auto-publish to the site
-- Non-notice external signals require curator review before public display
-- Extension signals are link-only unless explicit redistribution rights exist
-- `year_imputed` publication dates are excluded from the primary Task A benchmark and emitted into a noisy-date analysis split
-
-## Notes on model backends
-
-The repository runs fully offline with built-in pure-Python baselines. The abstract encoder baseline can optionally use a locally cached Transformer model, and the metadata baseline can optionally use XGBoost if that dependency is available. Neither is required for the default demo path.
+See [CITATION.cff](CITATION.cff). If you use this benchmark in published work, please also cite the upstream data sources per their terms.

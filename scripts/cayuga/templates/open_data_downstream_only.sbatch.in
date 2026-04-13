@@ -1,0 +1,127 @@
+#!/bin/bash
+#SBATCH -J lsib-open-data-downstream
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=32G
+#SBATCH --time=5-00:00:00
+#SBATCH -o __RUN_ROOT__/logs/open-data-downstream-%j.out
+
+set -euo pipefail
+
+RUN_ROOT="__RUN_ROOT__"
+ART_RELEASE="$RUN_ROOT/artifacts/open_data_release"
+ART_SITE="$RUN_ROOT/artifacts/open_data_site"
+RUNTIME_ROOT="$RUN_ROOT/artifacts/open_data_runtime"
+RAW_ROOT="$RUN_ROOT/raw/public_open_data_snapshot"
+REPO_ROOT="$RUN_ROOT/repo"
+SNAPSHOT_LABEL="${SNAPSHOT_LABEL:-2026-03-freeze}"
+SANITIZED_LABEL="${SNAPSHOT_LABEL//-/_}"
+SNAPSHOT_ID="${SNAPSHOT_ID_OVERRIDE:-public_open_data_${SANITIZED_LABEL}}"
+CANONICAL_SOURCE_DIR="$RUNTIME_ROOT/data/normalized/$SNAPSHOT_ID/canonical"
+CURRENT_STEP="bootstrap"
+COMMON_SH="$REPO_ROOT/scripts/cayuga/common_job_env.sh"
+
+mkdir -p "$ART_RELEASE" "$ART_SITE" "$RUNTIME_ROOT"
+rm -f "$ART_RELEASE/COMPLETED" "$ART_RELEASE/FAILED" "$ART_RELEASE/current_step.txt" "$ART_RELEASE/failed_step.txt"
+trap 'lsib_mark_failure "$ART_RELEASE" "$CURRENT_STEP"' ERR
+
+source "$COMMON_SH"
+lsib_activate_conda_env python.3.12.R.4.3.3
+PYTHON_BIN="$(command -v python3 || command -v python)"
+
+cd "$REPO_ROOT"
+export PYTHONPATH=src
+
+# Unlike open_data_finalize_template, this job does not require
+# the public-vendor-collection COMPLETED marker. It runs whenever
+# the raw snapshot itself is complete — which is all that is
+# actually required downstream.
+for required_dir in "$RAW_ROOT/openalex" "$RAW_ROOT/official_notices" "$RAW_ROOT/pubmed"; do
+  lsib_require_nonempty_dir "$required_dir"
+done
+
+CURRENT_STEP="register_snapshot"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --root-dir "$RUNTIME_ROOT" \
+  --release-dir "$ART_RELEASE" \
+  register-snapshot \
+  --snapshot-id "$SNAPSHOT_ID" \
+  --raw-root "$RAW_ROOT" \
+  --source-family openalex_notices
+
+CURRENT_STEP="ingest_openalex"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" ingest-snapshot --snapshot-id "$SNAPSHOT_ID" --collector openalex_bulk
+
+CURRENT_STEP="ingest_notices"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" ingest-snapshot --snapshot-id "$SNAPSHOT_ID" --collector local_notice_export
+
+CURRENT_STEP="ingest_pubmed"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" ingest-snapshot --snapshot-id "$SNAPSHOT_ID" --collector pubmed_index
+
+CURRENT_STEP="materialize_canonical"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" materialize-canonical --snapshot-id "$SNAPSHOT_ID"
+
+CURRENT_STEP="validate_snapshot"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --root-dir "$RUNTIME_ROOT" \
+  --release-dir "$ART_RELEASE" \
+  validate-snapshot \
+  --snapshot-id "$SNAPSHOT_ID"
+
+CURRENT_STEP="build_core"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --source-dir "$CANONICAL_SOURCE_DIR" \
+  --release-dir "$ART_RELEASE" \
+  --site-dir "$ART_SITE" \
+  build-core
+
+CURRENT_STEP="build_splits"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --source-dir "$CANONICAL_SOURCE_DIR" \
+  --release-dir "$ART_RELEASE" \
+  build-splits
+
+CURRENT_STEP="audit_leakage"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --source-dir "$CANONICAL_SOURCE_DIR" \
+  --release-dir "$ART_RELEASE" \
+  audit-leakage
+
+CURRENT_STEP="train_task_a"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --source-dir "$CANONICAL_SOURCE_DIR" \
+  --release-dir "$ART_RELEASE" \
+  train-task-a \
+  --text-backend hashing
+
+CURRENT_STEP="train_task_b"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --source-dir "$CANONICAL_SOURCE_DIR" \
+  --release-dir "$ART_RELEASE" \
+  train-task-b
+
+CURRENT_STEP="build_site"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --source-dir "$CANONICAL_SOURCE_DIR" \
+  --release-dir "$ART_RELEASE" \
+  --site-dir "$ART_SITE" \
+  build-site
+
+CURRENT_STEP="build_report"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --release-dir "$ART_RELEASE" \
+  build-report
+
+touch "$ART_RELEASE/COMPLETED"

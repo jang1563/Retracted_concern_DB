@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+title: Life-Science Integrity Signals Benchmark
+message: If you use this software, please cite it as below.
+type: software
+version: 0.1.0
+date-released: "2026-04-13"
+license: Apache-2.0
+repository-code: "https://github.com/jang1563/Retracted_concern_DB"
+url: "https://github.com/jang1563/Retracted_concern_DB"
+abstract: >-
+  A triage-benchmark harness for ranking life-science papers for human
+  integrity review. Ships a reproducible build pipeline, horizon-based
+  Task A ranking targets, Task B evidence-aggregation tiering, leakage
+  auditing, grouped holdout splits, a rights-aware ingest path for
+  OpenAlex, Retraction Watch, PubMed, and Crossref, and a read-only
+  evidence browser with dispute workflow. Explicitly not a fraud or
+  misconduct detector.
+keywords:
+  - research integrity
+  - retraction
+  - expression of concern
+  - benchmark
+  - triage
+  - scholarly metadata
+  - life sciences
+authors:
+  - family-names: "PLEASE-REPLACE-WITH-FULL-SURNAME"
+    given-names: "PLEASE-REPLACE-WITH-FULL-GIVEN-NAME"
+    alias: "jang1563"
