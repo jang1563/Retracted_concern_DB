@@ -1,0 +1,89 @@
+"""Metrics for ranking, calibration, and multilabel evaluation."""
+
+from typing import Dict, Iterable, List, Sequence
+
+
+def average_precision(labels: Sequence[int], scores: Sequence[float]) -> float:
+    paired = sorted(zip(scores, labels), key=lambda item: item[0], reverse=True)
+    positives = sum(labels)
+    if positives == 0:
+        return 0.0
+    running_hits = 0
+    running_sum = 0.0
+    for index, (_, label) in enumerate(paired, start=1):
+        if label:
+            running_hits += 1
+            running_sum += running_hits / index
+    return running_sum / positives
+
+
+def recall_at_k(labels: Sequence[int], scores: Sequence[float], k: int) -> float:
+    paired = sorted(zip(scores, labels), key=lambda item: item[0], reverse=True)[:k]
+    positives = sum(labels)
+    if positives == 0:
+        return 0.0
+    return sum(label for _, label in paired) / positives
+
+
+def expected_calibration_error(labels: Sequence[int], probs: Sequence[float], bins: int = 10) -> float:
+    bucket_totals = [0] * bins
+    bucket_labels = [0.0] * bins
+    bucket_probs = [0.0] * bins
+    for label, prob in zip(labels, probs):
+        index = min(bins - 1, int(prob * bins))
+        bucket_totals[index] += 1
+        bucket_labels[index] += label
+        bucket_probs[index] += prob
+    total = len(labels) or 1
+    ece = 0.0
+    for total_count, label_sum, prob_sum in zip(bucket_totals, bucket_labels, bucket_probs):
+        if not total_count:
+            continue
+        accuracy = label_sum / total_count
+        confidence = prob_sum / total_count
+        ece += abs(accuracy - confidence) * (total_count / total)
+    return ece
+
+
+def accuracy(labels: Sequence[str], preds: Sequence[str]) -> float:
+    if not labels:
+        return 0.0
+    matches = sum(1 for left, right in zip(labels, preds) if left == right)
+    return matches / len(labels)
+
+
+def macro_f1(label_rows: Sequence[Sequence[str]], pred_rows: Sequence[Sequence[str]], universe: Sequence[str]) -> float:
+    per_tag = []
+    for tag in universe:
+        tp = fp = fn = 0
+        for labels, preds in zip(label_rows, pred_rows):
+            labels_set = set(labels)
+            preds_set = set(preds)
+            if tag in labels_set and tag in preds_set:
+                tp += 1
+            elif tag not in labels_set and tag in preds_set:
+                fp += 1
+            elif tag in labels_set and tag not in preds_set:
+                fn += 1
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        if precision + recall == 0:
+            per_tag.append(0.0)
+        else:
+            per_tag.append((2 * precision * recall) / (precision + recall))
+    return sum(per_tag) / len(per_tag) if per_tag else 0.0
+
+
+def provenance_coverage(records) -> float:
+    if not records:
+        return 0.0
+    covered = sum(1 for record in records if record.source_names and record.source_urls)
+    return covered / len(records)
+
+
+def grouped_slice_counts(records) -> Dict[str, Dict[str, int]]:
+    output: Dict[str, Dict[str, int]] = {"subfield": {}, "publisher": {}}
+    for record in records:
+        output["subfield"][record.subfield] = output["subfield"].get(record.subfield, 0) + 1
+        output["publisher"][record.publisher] = output["publisher"].get(record.publisher, 0) + 1
+    return output

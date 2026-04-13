@@ -1,0 +1,57 @@
+#!/bin/bash
+#SBATCH -J lsib-sample-stress
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8G
+#SBATCH --time=08:00:00
+#SBATCH -o __RUN_ROOT__/logs/sample-stress-%j.out
+
+set -euo pipefail
+
+RUN_ROOT="__RUN_ROOT__"
+ART_ROOT="$RUN_ROOT/artifacts/sample_stress"
+WORK_ROOT="$ART_ROOT/work"
+REPO_ROOT="$RUN_ROOT/repo"
+LOG_DIR="$ART_ROOT/logs"
+DRIVER_LOG="$LOG_DIR/driver.log"
+CHECKSUMS="$ART_ROOT/checksums.tsv"
+END_EPOCH=$(( $(date +%s) + (8 * 3600) - 600 ))
+CURRENT_STEP="bootstrap"
+COMMON_SH="$REPO_ROOT/scripts/cayuga/common_job_env.sh"
+
+mkdir -p "$WORK_ROOT" "$LOG_DIR"
+trap 'lsib_mark_failure "$ART_ROOT" "$CURRENT_STEP"' ERR
+
+source "$COMMON_SH"
+lsib_activate_conda_env python.3.12.R.4.3.3
+
+cd "$REPO_ROOT"
+export PYTHONPATH=src
+
+: > "$DRIVER_LOG"
+: > "$CHECKSUMS"
+
+iter=0
+while [ "$(date +%s)" -lt "$END_EPOCH" ]; do
+  iter=$((iter + 1))
+  CURRENT_STEP="iter_$iter"
+  echo "[$(date '+%F %T')] START iter=$iter" >> "$DRIVER_LOG"
+
+  if python3 -m life_science_integrity_benchmark.cli \
+    --source-dir "$WORK_ROOT/sources" \
+    --release-dir "$WORK_ROOT/release" \
+    --site-dir "$WORK_ROOT/site" \
+    demo >> "$DRIVER_LOG" 2>&1; then
+    BENCH_SHA="$(sha256sum "$WORK_ROOT/release/benchmark_v1.jsonl" | awk '{print $1}')"
+    SUMMARY_SHA="$(sha256sum "$WORK_ROOT/release/summary.json" | awk '{print $1}')"
+    REPORT_SHA="$(sha256sum "$WORK_ROOT/release/experiment_report.json" | awk '{print $1}')"
+    printf "%s\t%s\t%s\t%s\n" "$iter" "$BENCH_SHA" "$SUMMARY_SHA" "$REPORT_SHA" >> "$CHECKSUMS"
+    echo "[$(date '+%F %T')] OK iter=$iter" >> "$DRIVER_LOG"
+  else
+    echo "$iter" > "$ART_ROOT/failed_iteration.txt"
+    echo "[$(date '+%F %T')] FAIL iter=$iter" >> "$DRIVER_LOG"
+    touch "$ART_ROOT/FAILED"
+    exit 1
+  fi
+done
+
+touch "$ART_ROOT/COMPLETED"

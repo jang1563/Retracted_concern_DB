@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+
+# OS / editor
+.claude/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Runtime data / build artifacts
+data/manifests/
+data/normalized/
+data/quarantine/
+artifacts/
+
+# Local env files (never commit filled-in secrets)
+*.env
+!env/raw_snapshot.env.example
+
+# Logs
+*.log
+logs/

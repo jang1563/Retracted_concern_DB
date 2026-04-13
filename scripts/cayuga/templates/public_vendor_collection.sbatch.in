@@ -1,0 +1,58 @@
+#!/bin/bash
+#SBATCH -J lsib-public-vendor
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=16G
+#SBATCH --time=24:00:00
+#SBATCH -o __RUN_ROOT__/logs/public-vendor-%j.out
+
+set -euo pipefail
+
+RUN_ROOT="__RUN_ROOT__"
+ART_ROOT="$RUN_ROOT/artifacts/public_vendor_collection"
+WORK_ROOT="$RUN_ROOT/artifacts/public_vendor_collection_work"
+REPO_ROOT="$RUN_ROOT/repo"
+VENDOR_ROOT="$RUN_ROOT/vendor_archive"
+SNAPSHOT_LABEL="${SNAPSHOT_LABEL:-2026-03-freeze}"
+RETRACTION_WATCH_COLLECTION_DATE="${RETRACTION_WATCH_COLLECTION_DATE:-$(date +%F)}"
+CURRENT_STEP="bootstrap"
+COMMON_SH="$REPO_ROOT/scripts/cayuga/common_job_env.sh"
+
+mkdir -p "$ART_ROOT" "$VENDOR_ROOT"
+rm -rf "$WORK_ROOT"
+rm -f "$ART_ROOT/COMPLETED" "$ART_ROOT/FAILED" "$ART_ROOT/current_step.txt" "$ART_ROOT/failed_step.txt" "$ART_ROOT/summary.txt"
+trap 'lsib_mark_failure "$ART_ROOT" "$CURRENT_STEP"' ERR
+
+source "$COMMON_SH"
+lsib_activate_slurm_client || true
+
+export AWS_BIN="${AWS_BIN:-/opt/ohpc/pub/software/awscli/2.2.14/bin/aws}"
+export CURL_BIN="${CURL_BIN:-/usr/bin/curl}"
+export WGET_BIN="${WGET_BIN:-/usr/bin/wget}"
+export GIT_BIN="${GIT_BIN:-/usr/bin/git}"
+export PYTHON_BIN="${PYTHON_BIN:-$HOME/miniconda3/miniconda3/bin/python}"
+export CROSSREF_SOURCE_MODE="skip"
+export ALLOW_MISSING_CROSSREF=1
+
+cd "$REPO_ROOT"
+
+CURRENT_STEP="runtime_check"
+echo "$CURRENT_STEP" > "$ART_ROOT/current_step.txt"
+./scripts/raw_snapshot/check_collection_runtime.sh
+
+CURRENT_STEP="collect_open_data_freeze"
+echo "$CURRENT_STEP" > "$ART_ROOT/current_step.txt"
+./scripts/raw_snapshot/collect_open_data_freeze.sh "$VENDOR_ROOT" "$RUN_ROOT/raw/public_open_data_snapshot" "$WORK_ROOT" "$SNAPSHOT_LABEL" symlink public_open_data_snapshot
+
+CURRENT_STEP="write_summary"
+echo "$CURRENT_STEP" > "$ART_ROOT/current_step.txt"
+cat > "$ART_ROOT/summary.txt" <<EOF
+snapshot_label=$SNAPSHOT_LABEL
+vendor_root=$VENDOR_ROOT
+raw_root=$RUN_ROOT/raw/public_open_data_snapshot
+openalex=collected
+retraction_watch=collected
+pubmed=collected
+crossref=skipped_open_data_only
+EOF
+
+touch "$ART_ROOT/COMPLETED"

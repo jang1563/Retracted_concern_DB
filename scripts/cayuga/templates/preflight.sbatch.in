@@ -1,0 +1,37 @@
+#!/bin/bash
+#SBATCH -J lsib-preflight
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8G
+#SBATCH --time=00:45:00
+#SBATCH -o __RUN_ROOT__/logs/preflight-%j.out
+
+set -euo pipefail
+
+RUN_ROOT="__RUN_ROOT__"
+ART_ROOT="$RUN_ROOT/artifacts/preflight"
+REPO_ROOT="$RUN_ROOT/repo"
+CURRENT_STEP="bootstrap"
+COMMON_SH="$REPO_ROOT/scripts/cayuga/common_job_env.sh"
+
+mkdir -p "$ART_ROOT"
+trap 'lsib_mark_failure "$ART_ROOT" "$CURRENT_STEP"' ERR
+
+source "$COMMON_SH"
+lsib_activate_conda_env python.3.12.R.4.3.3
+
+cd "$REPO_ROOT"
+export PYTHONPATH=src
+
+CURRENT_STEP="unit_tests"
+echo "$CURRENT_STEP" > "$ART_ROOT/current_step.txt"
+python3 -m unittest discover -s tests -v
+
+CURRENT_STEP="demo"
+echo "$CURRENT_STEP" > "$ART_ROOT/current_step.txt"
+python3 -m life_science_integrity_benchmark.cli \
+  --source-dir "$ART_ROOT/sources" \
+  --release-dir "$ART_ROOT/release" \
+  --site-dir "$ART_ROOT/site" \
+  demo
+
+touch "$ART_ROOT/COMPLETED"

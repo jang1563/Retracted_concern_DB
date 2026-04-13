@@ -1,0 +1,12 @@
+Expected local raw snapshot layout for the next real-data run:
+
+__RUN_ROOT__/raw/real_snapshot/openalex/
+__RUN_ROOT__/raw/real_snapshot/official_notices/
+__RUN_ROOT__/raw/real_snapshot/pubmed/
+
+Do not submit jobs/real_ingest_template.sbatch until these directories contain real files.
+
+Collector expectations:
+- openalex/: .jsonl or .jsonl.gz bulk shards
+- official_notices/: .jsonl, .jsonl.gz, .csv, or .csv.gz local notice exports
+- pubmed/: .jsonl, .jsonl.gz, .csv, .csv.gz, .xml, or .xml.gz DOI-joinable metadata
