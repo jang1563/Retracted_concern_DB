@@ -162,6 +162,115 @@ class BenchmarkTests(unittest.TestCase):
         self.assertFalse(report.passed)
         self.assertEqual(report.feature_cutoff_violations[0]["field"], "author_history_signal_count")
 
+    # --- Leakage-audit sensitivity battery -----------------------------
+    # Each of the tests below injects exactly one known-leaky pattern
+    # into a clean record and asserts that the audit (a) fails overall
+    # and (b) attributes the failure to the right check. These are the
+    # "audit has teeth" tests — they prove the leakage_report.passed=True
+    # in the demo is informative, not vacuous.
+
+    def test_leakage_audit_passes_on_clean_records(self):
+        # Baseline: on the unmodified sample corpus, the audit must PASS
+        # and every violation list must be empty. Without this, any test
+        # that checks `passed=False` on a mutated record is vacuously
+        # satisfied.
+        report = build_leakage_report(self.records, snapshot_date="2026-04-09")
+        self.assertTrue(report.passed)
+        self.assertEqual(report.leaked_fields_found, [])
+        self.assertEqual(report.records_with_invalid_event_order, [])
+        self.assertEqual(report.records_with_snapshot_violations, [])
+        self.assertEqual(report.records_missing_feature_provenance, [])
+        self.assertEqual(report.feature_cutoff_violations, [])
+
+    def test_leakage_audit_flags_invalid_event_order(self):
+        # first_signal_date or first_notice_date dated BEFORE publication
+        # is logically impossible and must be caught. Covers both fields.
+        signal_before_pub = replace(
+            self.records[0],
+            first_signal_date="2000-01-01",
+            first_notice_date=None,
+        )
+        report = build_leakage_report([signal_before_pub], snapshot_date="2026-04-09")
+        self.assertFalse(report.passed)
+        self.assertIn(signal_before_pub.doi, report.records_with_invalid_event_order)
+
+        notice_before_pub = replace(
+            self.records[0],
+            first_signal_date=None,
+            first_notice_date="2000-01-01",
+        )
+        report = build_leakage_report([notice_before_pub], snapshot_date="2026-04-09")
+        self.assertFalse(report.passed)
+        self.assertIn(notice_before_pub.doi, report.records_with_invalid_event_order)
+
+    def test_leakage_audit_flags_post_snapshot_events(self):
+        # Post-publication events dated AFTER the declared snapshot must
+        # be caught — otherwise the "as-of-snapshot" framing is violated
+        # and the release contains future information.
+        late_signal = replace(
+            self.records[0],
+            first_signal_date="2099-01-01",
+            first_notice_date=None,
+        )
+        report = build_leakage_report([late_signal], snapshot_date="2026-04-09")
+        self.assertFalse(report.passed)
+        self.assertIn(late_signal.doi, report.records_with_snapshot_violations)
+
+        late_notice = replace(
+            self.records[0],
+            first_signal_date=None,
+            first_notice_date="2099-01-01",
+        )
+        report = build_leakage_report([late_notice], snapshot_date="2026-04-09")
+        self.assertFalse(report.passed)
+        self.assertIn(late_notice.doi, report.records_with_snapshot_violations)
+
+    def test_leakage_audit_flags_wrong_task_a_feature_cutoff(self):
+        # task_a_feature_cutoff_date must equal publication_date exactly;
+        # any drift means Task A is seeing features censored at a
+        # different-than-documented horizon.
+        mismatched = replace(
+            self.records[0],
+            task_a_feature_cutoff_date="2020-01-01",
+        )
+        report = build_leakage_report([mismatched], snapshot_date="2026-04-09")
+        self.assertFalse(report.passed)
+        offending_fields = {v["field"] for v in report.feature_cutoff_violations}
+        self.assertIn("task_a_feature_cutoff_date", offending_fields)
+
+    def test_leakage_audit_flags_missing_provenance_fields(self):
+        # Feature provenance is mandatory; missing any of the three
+        # cutoff dates means the record cannot be evaluated under the
+        # leakage contract.
+        missing_task_cutoff = replace(self.records[0], task_a_feature_cutoff_date="")
+        report = build_leakage_report([missing_task_cutoff], snapshot_date="2026-04-09")
+        self.assertFalse(report.passed)
+        self.assertIn(missing_task_cutoff.doi, report.records_missing_feature_provenance)
+
+        missing_author_cutoff = replace(self.records[0], author_history_cutoff_date="")
+        report = build_leakage_report([missing_author_cutoff], snapshot_date="2026-04-09")
+        self.assertFalse(report.passed)
+        self.assertIn(missing_author_cutoff.doi, report.records_missing_feature_provenance)
+
+        missing_journal_cutoff = replace(self.records[0], journal_history_cutoff_date="")
+        report = build_leakage_report([missing_journal_cutoff], snapshot_date="2026-04-09")
+        self.assertFalse(report.passed)
+        self.assertIn(missing_journal_cutoff.doi, report.records_missing_feature_provenance)
+
+    def test_leakage_audit_flags_future_censored_journal_history(self):
+        # Analog of the existing future-censored-author-history test,
+        # extended to journal_history_cutoff_date so both censored
+        # history fields are mechanically verified.
+        bad_record = replace(
+            self.records[0],
+            journal_history_cutoff_date="2099-12-31",
+            publication_date="2018-02-15",
+        )
+        report = build_leakage_report([bad_record], snapshot_date="2099-12-31")
+        self.assertFalse(report.passed)
+        offending_fields = {v["field"] for v in report.feature_cutoff_violations}
+        self.assertIn("journal_history_signal_count", offending_fields)
+
     def test_release_reload_preserves_provenance(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)

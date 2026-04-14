@@ -37,6 +37,8 @@ Subfield distribution: `bioinformatics=5`, `biology=5`, `biomedicine=6`.
 
 ## Leakage Audit
 
+The audit is covered by a **sensitivity battery** in `tests/test_benchmark.py`: seven unit tests inject known-leaky patterns (pre-publication signal/notice dates, post-snapshot events, mismatched `task_a_feature_cutoff_date`, future-censored author/journal history cutoffs, and each missing-provenance case) and assert that the audit both (a) fails overall and (b) attributes the failure to the correct check. One more test confirms the audit passes on the unmodified corpus. So a `PASS` in this report is informative, not vacuous.
+
 The `audit-leakage` CLI step produced a clean report on this release:
 
 | Check | Result |
@@ -168,7 +170,7 @@ artifacts/sample_release/
 
 ## Test Suite
 
-The repository ships with `tests/test_benchmark.py` covering dataset logic, label derivation, split construction, leakage auditing, baseline model fitting, site generation, ingest manifests, and the vendor-archive → raw-snapshot pipeline. All 20 tests pass on Python 3.13 with zero external dependencies.
+The repository ships with `tests/test_benchmark.py` covering dataset logic, label derivation, split construction, leakage auditing (including a seven-test sensitivity battery — pre-publication events, post-snapshot events, task-A feature-cutoff mismatch, future-censored author and journal history, each missing-provenance case, and a clean-corpus baseline), Task A cross-split robustness, baseline model fitting, site generation, ingest manifests, and the vendor-archive → raw-snapshot pipeline. All 27 tests pass on Python 3.13 with zero external dependencies.
 
 ## What Real-Data Results Will Add
 
