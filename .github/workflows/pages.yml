@@ -1,0 +1,54 @@
+name: Deploy evidence-browser demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build sample release and static site
+        env:
+          PYTHONPATH: src
+        run: python -m life_science_integrity_benchmark.cli demo
+
+      - name: Add Pages landing note
+        run: |
+          cat > artifacts/site/_github_pages_note.html <<'EOF'
+          <!-- Deployed automatically from the demo build.
+               Source: https://github.com/jang1563/Retracted_concern_DB -->
+          EOF
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: artifacts/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

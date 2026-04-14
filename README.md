@@ -1,8 +1,11 @@
 # Life-Science Integrity Signals Benchmark
 
 [![CI](https://github.com/jang1563/Retracted_concern_DB/actions/workflows/ci.yml/badge.svg)](https://github.com/jang1563/Retracted_concern_DB/actions/workflows/ci.yml)
+[![Pages](https://github.com/jang1563/Retracted_concern_DB/actions/workflows/pages.yml/badge.svg)](https://jang1563.github.io/Retracted_concern_DB/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%20%7C%203.11%20%7C%203.13-blue.svg)](#)
+
+**Live demo:** [jang1563.github.io/Retracted_concern_DB](https://jang1563.github.io/Retracted_concern_DB/) — the evidence browser built from the synthetic sample corpus, auto-deployed from every commit to `main`.
 
 A **triage-benchmark harness** for ranking life-science papers for human integrity review.
 
