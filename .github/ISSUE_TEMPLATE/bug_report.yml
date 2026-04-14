@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in the ingest, benchmark build, or site generation pipeline doesn't work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Please do not use this template to dispute a specific record's integrity notice — that goes through the dispute contact on the public release's site page.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Tag, release, or commit SHA where you observed the bug.
+      placeholder: v0.1 or b2a413e
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.11"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: What did you run? (Ideally a CLI command or a short script.)
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What you got
+      description: Error messages, unexpected output, or a link to a failing CI run.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I am not reporting a record-level integrity dispute (those go through the dispute contact on the site).
+          required: true
+        - label: I have read CONTRIBUTING.md.
+          required: false

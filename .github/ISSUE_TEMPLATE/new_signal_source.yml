@@ -1,0 +1,72 @@
+name: Propose a new signal source
+description: Suggest a new integrity-signal source (notice feed, watchlist, community-flag stream) to ingest.
+labels: ["enhancement", "source-proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Sources that cannot be integrated as rights-safe (link-only if required by license) will not be merged. Please read `docs/source_rights_matrix.md` before filling this out.
+  - type: input
+    id: source-name
+    attributes:
+      label: Source name
+      placeholder: "e.g., Retraction Watch Database, PubPeer, journal X's corrections feed"
+    validations:
+      required: true
+  - type: input
+    id: source-url
+    attributes:
+      label: Source URL
+    validations:
+      required: true
+  - type: dropdown
+    id: source-class
+    attributes:
+      label: Source class
+      options:
+        - Official notice (publisher/journal/platform)
+        - Community discussion platform (PubPeer, forums)
+        - Paper-mill or research-integrity watchlist
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: record-key
+    attributes:
+      label: Record identification level
+      options:
+        - DOI-level
+        - Journal-level
+        - Author-level
+        - Mixed / other
+    validations:
+      required: true
+  - type: textarea
+    id: rights
+    attributes:
+      label: Redistribution rights
+      description: What does the license allow? Full text, metadata only, link-only? Cite the license.
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample records
+      description: Rights permitting, paste 2-3 example records (redact identifying details if needed).
+      render: text
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why this source
+      description: What gap does it fill? How would it interact with existing collectors?
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmations
+      options:
+        - label: This source can be integrated in a rights-safe way (link-only is fine).
+          required: true
+        - label: I understand non-notice external signals are curator-gated and do not auto-publish to the site.
+          required: true

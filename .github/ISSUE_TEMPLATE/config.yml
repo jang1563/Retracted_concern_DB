@@ -1,0 +1,19 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Dispute a specific record
+    url: https://github.com/jang1563/Retracted_concern_DB/blob/main/docs/governance_policy.md
+    about: >-
+      Do not open a public GitHub issue to dispute a record-level integrity
+      notice. Use the dispute contact on the public release's site page so
+      the record is handled through the correction workflow rather than a
+      public thread.
+  - name: Report a security or rights-redistribution issue
+    url: https://github.com/jang1563/Retracted_concern_DB/blob/main/SECURITY.md
+    about: >-
+      Credentials in history, rights-leak in a public release, or an
+      ingest-pipeline vulnerability — follow responsible disclosure.
+  - name: Report misuse or an ethics concern
+    url: https://github.com/jang1563/Retracted_concern_DB/blob/main/ETHICS.md
+    about: >-
+      Concerns about downstream misuse of this benchmark (risk scores,
+      leaderboards, automated decisions about named individuals).
