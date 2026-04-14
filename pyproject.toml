@@ -9,7 +9,7 @@ description = "Benchmark core and evidence browser scaffold for life-science int
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
-  { name = "jang1563" }
+  { name = "JangKeun Kim" }
 ]
 license = { text = "Apache-2.0" }
 dependencies = []
