@@ -107,6 +107,51 @@ class BenchmarkTests(unittest.TestCase):
         self.assertIn("task_a_12m_noisy_date", manifests)
         self.assertIn("10.5555/lsib.2021.noisy", manifests["task_a_12m_noisy_date"].train_dois + manifests["task_a_12m_noisy_date"].val_dois + manifests["task_a_12m_noisy_date"].test_dois)
 
+    def test_task_a_robustness_runs_on_every_grouped_holdout(self):
+        from life_science_integrity_benchmark.baselines import run_task_a_robustness
+
+        manifests = build_split_manifests(self.records)
+        result = run_task_a_robustness(self.records, manifests, text_backend="hashing")
+
+        # Primary time splits and the three grouped holdouts (per horizon)
+        # must be present, and noisy-date splits must NOT be in the
+        # robustness pass (they have their own analysis split).
+        expected_present = {
+            "task_a_12m",
+            "task_a_12m_author_cluster_holdout",
+            "task_a_12m_venue_holdout",
+            "task_a_12m_publisher_holdout",
+            "task_a_36m",
+            "task_a_36m_author_cluster_holdout",
+            "task_a_36m_venue_holdout",
+            "task_a_36m_publisher_holdout",
+        }
+        self.assertTrue(expected_present.issubset(result.keys()))
+        self.assertNotIn("task_a_12m_noisy_date", result)
+        self.assertNotIn("task_a_36m_noisy_date", result)
+        self.assertNotIn("task_b", result)
+
+        # On every non-empty split we should get three baseline runs
+        # (metadata_logistic, abstract_encoder, fusion) with proper
+        # per-split task names so downstream consumers can tell them
+        # apart.
+        for split_name, runs in result.items():
+            if not runs:
+                continue
+            self.assertEqual(len(runs), 3)
+            model_names = {r.model_name for r in runs}
+            self.assertEqual(
+                model_names,
+                {
+                    "metadata_logistic_baseline",
+                    "abstract_encoder_baseline",
+                    "metadata_text_fusion_baseline",
+                },
+            )
+            for r in runs:
+                self.assertEqual(r.task_name, split_name)
+                self.assertIn("AUPRC", r.metrics)
+
     def test_leakage_audit_flags_future_censored_feature(self):
         bad_record = replace(
             self.records[0],

@@ -7,7 +7,12 @@ from pathlib import Path
 
 from .adjudication import export_adjudication_pack
 from .audit import build_leakage_report
-from .baselines import run_task_a_baselines, run_task_b_baseline, split_records_for_manifest
+from .baselines import (
+    run_task_a_baselines,
+    run_task_a_robustness,
+    run_task_b_baseline,
+    split_records_for_manifest,
+)
 from .constants import (
     MANIFEST_DB_PATH,
     NOTICE_COLLECTOR,
@@ -331,6 +336,16 @@ def _train_task_a(records, manifests, release_dir: Path, text_backend: str):
     path = release_dir / "task_a_baselines.json"
     write_json(path, outputs)
     print("task_a_baselines:", path)
+
+    robustness = run_task_a_robustness(records, manifests, text_backend=text_backend)
+    robustness_payload = {
+        split_name: [asdict(run) for run in runs]
+        for split_name, runs in robustness.items()
+    }
+    robustness_path = release_dir / "task_a_robustness.json"
+    write_json(robustness_path, robustness_payload)
+    print("task_a_robustness:", robustness_path)
+
     return outputs
 
 
@@ -376,6 +391,8 @@ def _build_report(release_dir: Path):
     collection_summary_path = release_dir / "collection_summary.json"
     if collection_summary_path.exists():
         collection_summary = read_json(collection_summary_path)
+    robustness_path = release_dir / "task_a_robustness.json"
+    task_a_robustness = read_json(robustness_path) if robustness_path.exists() else {}
     report_paths = build_experiment_report(
         summary=read_json(release_dir / "summary.json"),
         splits=read_json(release_dir / "splits.json"),
@@ -385,6 +402,7 @@ def _build_report(release_dir: Path):
         markdown_path=release_dir / "experiment_report.md",
         json_path=release_dir / "experiment_report.json",
         ingest_summary=collection_summary,
+        task_a_robustness=task_a_robustness,
     )
     for name, path in report_paths.items():
         print("%s: %s" % (name, path))

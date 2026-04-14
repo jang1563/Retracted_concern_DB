@@ -94,6 +94,30 @@ Three baseline models are included: a metadata-only logistic regression, an abst
 
 On the sample corpus, AUPRC-by-subfield reveals a degenerate `biology=0.0` in every Task A configuration. That is an artifact of a small synthetic dataset where the test fold's `biology` slice has no positive label under this split seed; it is a useful reminder that subfield-sliced metrics are sensitive to cohort size and that real-data evaluation needs larger cohorts.
 
+## Task A Robustness (Grouped Holdouts)
+
+New in this release: every Task A baseline now also runs on the three grouped-holdout manifests (author cluster, venue, publisher) in addition to the primary time split. This is the empirical test of whether the model is learning a transferable signal or a per-venue / per-publisher artifact.
+
+**Task A 12m — AUPRC by model × split:**
+
+| Model | primary | author_cluster_holdout | venue_holdout | publisher_holdout |
+| --- | --- | --- | --- | --- |
+| metadata_logistic | 0.700 | **0.000** | 1.000 | 1.000 |
+| abstract_encoder (hashing) | 0.700 | **0.000** | 0.500 | 1.000 |
+| metadata + text fusion | 0.700 | **0.000** | 1.000 | 1.000 |
+
+**Task A 36m — AUPRC by model × split:**
+
+| Model | primary | author_cluster_holdout | venue_holdout | publisher_holdout |
+| --- | --- | --- | --- | --- |
+| metadata_logistic | 0.917 | 1.000 | 1.000 | 1.000 |
+| abstract_encoder (hashing) | 0.806 | 1.000 | 1.000 | 1.000 |
+| metadata + text fusion | 0.917 | 1.000 | 1.000 | 1.000 |
+
+The 12m author-cluster holdout collapsing to AUPRC=0.000 across all three baselines is an artifact of the 1-record test fold (the held-out cluster has a single positive in the test slice that the models consistently rank low). On 16 synthetic records these numbers are not individually informative, but they demonstrate that the robustness harness does surface distributional shift — on real data the same table will show meaningful deltas between the primary split and the grouped holdouts, quantifying how much of each baseline's headline AUPRC comes from venue / publisher / authorship recurrence versus generalizable signal.
+
+The raw per-split runs, including all metrics (AUPRC, Recall@1%, Recall@5%, ECE, subfield-AUPRC), are in [artifacts/sample_release/task_a_robustness.json](../artifacts/sample_release/task_a_robustness.json) after running the demo.
+
 ## Task B Baseline
 
 A keyword-rules-over-provenance baseline classifies notice status and applies issue tags from snapshot-visible evidence:
@@ -131,7 +155,8 @@ artifacts/sample_release/
 ├── summary.json                     # counts and snapshot metadata
 ├── splits.json                      # 14 split manifests
 ├── leakage_report.json              # audit-leakage output
-├── task_a_baselines.json            # 6 baseline runs × 2 horizons × 3 models
+├── task_a_baselines.json            # primary-split baselines (2 horizons × 3 models)
+├── task_a_robustness.json           # baselines across 8 manifests (primary + 3 holdouts × 2 horizons)
 ├── task_b_baseline.json             # Task B keyword baseline
 ├── adjudication_queue.csv           # double-review queue for labeled records
 ├── adjudication_queue_summary.json

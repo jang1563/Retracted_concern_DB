@@ -76,7 +76,7 @@ _TODO: replace with real metrics. Three models per horizon as in the synthetic d
 | abstract_encoder (hashing) | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
 | metadata + text fusion | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
 
-Subfield-sliced AUPRC and robustness-split numbers: _TBD — pull from `task_a_baselines.json`._
+Subfield-sliced AUPRC and robustness-split numbers: _TBD — pull from `task_a_baselines.json` and `task_a_robustness.json` (the latter covers all 8 manifests: primary + author_cluster / venue / publisher holdouts × 2 horizons)._
 
 ## Task B Baseline
 

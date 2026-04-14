@@ -132,6 +132,46 @@ def run_task_a_baselines(
     ]
 
 
+def run_task_a_robustness(
+    records: List[BenchmarkRecord],
+    manifests,
+    text_backend: str = "hashing",
+    transformer_model_name: str = "allenai/scibert_scivocab_uncased",
+) -> Dict[str, List[BaselineRun]]:
+    """Run Task A baselines across the primary time split AND every grouped
+    holdout manifest (author cluster, venue, publisher), for both horizons.
+
+    Returns a mapping from manifest name (e.g. ``task_a_12m`` or
+    ``task_a_36m_venue_holdout``) to the list of baseline runs produced on
+    that split. This is how robustness to distributional shift across
+    authorship clusters, venues, and publishers gets measured empirically
+    rather than just claimed in the README.
+    """
+    runs_by_split: Dict[str, List[BaselineRun]] = {}
+    for manifest_name in sorted(manifests):
+        if not manifest_name.startswith("task_a_"):
+            continue
+        if manifest_name.endswith("_noisy_date"):
+            continue
+        manifest = manifests[manifest_name]
+        train_records, _, test_records = split_records_for_manifest(records, manifest)
+        if not train_records or not test_records:
+            runs_by_split[manifest_name] = []
+            continue
+        horizon = "12m" if "12m" in manifest_name else "36m"
+        runs = run_task_a_baselines(
+            train_records=train_records,
+            test_records=test_records,
+            horizon=horizon,
+            text_backend=text_backend,
+            transformer_model_name=transformer_model_name,
+        )
+        for run in runs:
+            run.task_name = manifest_name
+        runs_by_split[manifest_name] = runs
+    return runs_by_split
+
+
 def run_task_b_baseline(records: List[BenchmarkRecord]) -> BaselineRun:
     gold_notice = [record.notice_status for record in records]
     gold_tags = [sorted(set(record.core_tags + record.extension_tags)) for record in records]

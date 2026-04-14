@@ -94,6 +94,7 @@ A clean `demo` run on the 16-record synthetic corpus produces:
 - **Leakage audit** — **PASS** with zero violations across 11 banned field classes and 14 publication-time Task A features. See [leakage_report.json](artifacts/sample_release/leakage_report.json) after running the demo.
 - **14 split manifests** — primary time split + author-cluster / venue / publisher holdouts × Task A 12m, 36m, Task B.
 - **Task A baselines** — 3 models × 2 horizons × all metrics (AUPRC, Recall@1%, Recall@5%, ECE, subfield-AUPRC). On the 36m horizon: metadata_logistic AUPRC=0.92, text hashing 0.81, fusion 0.92.
+- **Task A robustness** — every baseline also runs across 8 split manifests (primary + author-cluster / venue / publisher holdouts × 2 horizons), producing `task_a_robustness.json`. This is how generalization-under-distributional-shift gets measured instead of just claimed.
 - **Task B baseline** — keyword-rules-over-provenance; notice accuracy 1.00, tag macro-F1 0.98, provenance coverage 0.69 on the synthetic set.
 - **Evidence browser site** — landing page with search, governance disclaimer, per-record pages, policy, and change log; non-notice signals are held in `internal_curation_queue.json` off the public site.
 - **Experiment report** — both Markdown and JSON.
