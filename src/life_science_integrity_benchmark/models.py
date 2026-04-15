@@ -49,6 +49,21 @@ class MetadataVectorizer:
         self.fit(records)
         return self.transform(records)
 
+    def feature_names(self) -> List[str]:
+        """Return feature names in the same order as ``transform()`` output.
+
+        Categorical features (venue, publisher, subfield, oa_status) come
+        first in the order they were first seen during ``fit()``, followed by
+        the fixed numeric features.
+        """
+        names: List[str] = [""] * (len(self.category_to_index) + len(self.numeric_fields))
+        for name, idx in self.category_to_index.items():
+            names[idx] = name
+        offset = len(self.category_to_index)
+        for i, field in enumerate(self.numeric_fields):
+            names[offset + i] = field
+        return names
+
     def _categorical_features(self, record) -> List[str]:
         return [
             "venue=" + record.venue,

@@ -174,6 +174,128 @@ per-publisher artifacts.
     )
 
 
+def build_calibration_svg(task_a_baselines: dict) -> str:
+    """Generate a reliability-diagram SVG for all Task A baseline runs.
+
+    Produces a 2-row × 3-column panel grid: rows are horizons (12m, 36m),
+    columns are the three baseline models.  Each panel shows:
+    - A dashed diagonal (perfect calibration reference)
+    - A polyline + dots for the actual mean-predicted-probability vs.
+      fraction-positive in each bin
+    - A filled background with a thin border
+
+    Returns the SVG markup as a string.  No external dependencies are needed —
+    only the ``calibration_curve`` list that ``_ranking_metrics()`` already
+    attaches to every ``BaselineRun.metrics`` dict.
+    """
+    MODELS = [
+        "metadata_logistic_baseline",
+        "abstract_encoder_baseline",
+        "metadata_text_fusion_baseline",
+    ]
+    MODEL_LABELS = ["metadata", "abstract", "fusion"]
+    HORIZONS = ["task_a_12m", "task_a_36m"]
+    HORIZON_LABELS = ["12m", "36m"]
+    COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c"]
+
+    # Layout constants (all in SVG user units = pixels)
+    PW, PH = 110, 100   # data-area width / height per panel
+    CW, CH = 148, 130   # cell width / height (data area + internal padding)
+    PAD_L, PAD_T = 22, 22  # padding from cell top-left to data area top-left
+    ML, MT = 52, 44    # outer left / top margin
+
+    NCOLS, NROWS = len(MODELS), len(HORIZONS)
+    SVG_W = ML + NCOLS * CW + 10
+    SVG_H = MT + NROWS * CH + 30
+
+    def to_svg(px: float, py: float, col: int, row: int):
+        """Map (px, py) in [0,1]×[0,1] to SVG pixel coordinates."""
+        ox = ML + col * CW + PAD_L
+        oy = MT + row * CH + PAD_T
+        return ox + px * PW, oy + (1.0 - py) * PH
+
+    out = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">' % (SVG_W, SVG_H),
+        '  <rect width="%d" height="%d" fill="white"/>' % (SVG_W, SVG_H),
+    ]
+
+    # Column headers
+    for col, label in enumerate(MODEL_LABELS):
+        lx = ML + col * CW + PAD_L + PW // 2
+        ly = MT - 8
+        out.append(
+            '  <text x="%d" y="%d" text-anchor="middle" '
+            'font-size="11" font-family="sans-serif">%s</text>' % (lx, ly, label)
+        )
+
+    # Row labels
+    for row, label in enumerate(HORIZON_LABELS):
+        lx = ML - 6
+        ly = MT + row * CH + PAD_T + PH // 2
+        out.append(
+            '  <text x="%d" y="%d" text-anchor="end" dominant-baseline="middle" '
+            'font-size="11" font-family="sans-serif">%s</text>' % (lx, ly, label)
+        )
+
+    for row, horizon in enumerate(HORIZONS):
+        runs = task_a_baselines.get(horizon, [])
+        for col, (model_name, color) in enumerate(zip(MODELS, COLORS)):
+            bx = ML + col * CW + PAD_L
+            by = MT + row * CH + PAD_T
+            # Panel background + border
+            out.append(
+                '  <rect x="%d" y="%d" width="%d" height="%d" '
+                'fill="#f7f7f7" stroke="#cccccc" stroke-width="1"/>'
+                % (bx, by, PW, PH)
+            )
+            # Perfect-calibration diagonal (dashed)
+            x0, y0 = to_svg(0.0, 0.0, col, row)
+            x1, y1 = to_svg(1.0, 1.0, col, row)
+            out.append(
+                '  <line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" '
+                'stroke="#aaaaaa" stroke-width="1" stroke-dasharray="4,3"/>'
+                % (x0, y0, x1, y1)
+            )
+            # Find matching run
+            run = next((r for r in runs if r.get("model_name") == model_name), None)
+            if run is None:
+                continue
+            bins = (run.get("metrics") or {}).get("calibration_curve") or []
+            if len(bins) < 2:
+                continue
+            pts = [
+                to_svg(b["mean_predicted"], b["fraction_positive"], col, row)
+                for b in bins
+            ]
+            polyline = " ".join("%.1f,%.1f" % (sx, sy) for sx, sy in pts)
+            out.append(
+                '  <polyline points="%s" fill="none" stroke="%s" stroke-width="2"/>'
+                % (polyline, color)
+            )
+            for sx, sy in pts:
+                out.append(
+                    '  <circle cx="%.1f" cy="%.1f" r="3" fill="%s"/>' % (sx, sy, color)
+                )
+
+    # Axis labels
+    ax_x = ML + (NCOLS * CW) // 2
+    ax_y = MT + NROWS * CH + 20
+    out.append(
+        '  <text x="%d" y="%d" text-anchor="middle" '
+        'font-size="11" font-family="sans-serif">mean predicted probability</text>'
+        % (ax_x, ax_y)
+    )
+    rot_x = -(MT + NROWS * CH // 2)
+    out.append(
+        '  <text transform="rotate(-90)" x="%d" y="13" text-anchor="middle" '
+        'font-size="11" font-family="sans-serif">fraction positive</text>' % rot_x
+    )
+
+    out.append("</svg>")
+    return "\n".join(out)
+
+
 def _robustness_lines(task_a_robustness: dict) -> str:
     if not task_a_robustness:
         return "- No robustness results available."

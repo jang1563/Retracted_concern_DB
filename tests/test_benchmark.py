@@ -1491,5 +1491,93 @@ class BenchmarkTests(unittest.TestCase):
         self.assertIn("crossref_plus_token=not_required", result.stdout)
 
 
+    def test_metadata_baseline_exposes_feature_importance(self):
+        """Metadata logistic run must include a non-empty feature_importance list
+        whose entries are dicts with ``feature`` (str) and ``weight`` (float) keys,
+        sorted descending by absolute weight."""
+        from life_science_integrity_benchmark.baselines import (
+            run_task_a_baselines,
+            split_records_for_manifest,
+        )
+        from life_science_integrity_benchmark.splits import build_split_manifests
+
+        manifests = build_split_manifests(self.records)
+        train, _, test = split_records_for_manifest(self.records, manifests["task_a_12m"])
+        runs = run_task_a_baselines(train, test, horizon="12m")
+        metadata_run = next(r for r in runs if r.model_name == "metadata_logistic_baseline")
+
+        fi = metadata_run.metrics.get("feature_importance", [])
+        self.assertIsInstance(fi, list)
+        self.assertGreater(len(fi), 0, "feature_importance must not be empty")
+        for entry in fi:
+            self.assertIn("feature", entry)
+            self.assertIn("weight", entry)
+            self.assertIsInstance(entry["feature"], str)
+            self.assertIsInstance(entry["weight"], float)
+        # Sorted descending by abs weight
+        weights = [abs(e["weight"]) for e in fi]
+        self.assertEqual(weights, sorted(weights, reverse=True))
+
+    def test_all_baselines_include_calibration_curve(self):
+        """Every Task A baseline run must include a ``calibration_curve`` list of
+        bin dicts.  Each non-empty bin must have the required keys and values in
+        [0, 1]."""
+        from life_science_integrity_benchmark.baselines import (
+            run_task_a_baselines,
+            split_records_for_manifest,
+        )
+        from life_science_integrity_benchmark.splits import build_split_manifests
+
+        manifests = build_split_manifests(self.records)
+        train, _, test = split_records_for_manifest(self.records, manifests["task_a_12m"])
+        runs = run_task_a_baselines(train, test, horizon="12m")
+
+        self.assertEqual(len(runs), 3)
+        for run in runs:
+            curve = run.metrics.get("calibration_curve")
+            self.assertIsInstance(curve, list, "calibration_curve missing for %s" % run.model_name)
+            for bin_entry in curve:
+                for key in ("bin_lower", "bin_upper", "mean_predicted", "fraction_positive", "count"):
+                    self.assertIn(key, bin_entry)
+                self.assertGreaterEqual(bin_entry["fraction_positive"], 0.0)
+                self.assertLessEqual(bin_entry["fraction_positive"], 1.0)
+                self.assertGreaterEqual(bin_entry["mean_predicted"], 0.0)
+                self.assertLessEqual(bin_entry["mean_predicted"], 1.0)
+
+    def test_calibration_svg_is_valid_xml(self):
+        """``build_calibration_svg`` must return well-formed XML with the expected
+        panel structure (2 horizons × 3 models)."""
+        import xml.etree.ElementTree as ET
+        from life_science_integrity_benchmark.reporting import build_calibration_svg
+
+        baselines = {
+            "task_a_12m": [
+                {
+                    "model_name": "metadata_logistic_baseline",
+                    "metrics": {
+                        "calibration_curve": [
+                            {"bin_lower": 0.0, "bin_upper": 0.2, "mean_predicted": 0.1,
+                             "fraction_positive": 0.05, "count": 4},
+                            {"bin_lower": 0.4, "bin_upper": 0.6, "mean_predicted": 0.5,
+                             "fraction_positive": 0.6, "count": 3},
+                            {"bin_lower": 0.8, "bin_upper": 1.0, "mean_predicted": 0.9,
+                             "fraction_positive": 0.9, "count": 2},
+                        ]
+                    },
+                }
+            ],
+            "task_a_36m": [],
+        }
+        svg_text = build_calibration_svg(baselines)
+        self.assertIn("<svg", svg_text)
+        # Must parse as valid XML
+        root = ET.fromstring(svg_text)
+        self.assertEqual(root.tag, "{http://www.w3.org/2000/svg}svg")
+        # At least one polyline rendered for the populated 12m panel
+        ns = {"svg": "http://www.w3.org/2000/svg"}
+        polylines = root.findall(".//svg:polyline", ns)
+        self.assertGreater(len(polylines), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

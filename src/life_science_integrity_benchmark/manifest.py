@@ -2,6 +2,7 @@
 
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -50,8 +51,27 @@ class ManifestStore:
         connection.row_factory = sqlite3.Row
         return connection
 
+    @contextmanager
+    def _transact(self):
+        """Context manager that opens a connection, yields it, commits on
+        success (or rolls back on exception), and always closes the connection.
+
+        Use this everywhere instead of bare ``with self._connect() as conn:``
+        so that SQLite file descriptors are released promptly and Python's
+        ResourceWarning is suppressed in tests.
+        """
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def _ensure_schema(self) -> None:
-        with self._connect() as connection:
+        with self._transact() as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS snapshots (
@@ -146,7 +166,7 @@ class ManifestStore:
         )
 
         now = utcnow_iso()
-        with self._connect() as connection:
+        with self._transact() as connection:
             existing = connection.execute(
                 "SELECT * FROM snapshots WHERE snapshot_id = ?", (snapshot_id,)
             ).fetchone()
@@ -220,7 +240,7 @@ class ManifestStore:
         }
 
     def get_snapshot(self, snapshot_id: str) -> sqlite3.Row:
-        with self._connect() as connection:
+        with self._transact() as connection:
             row = connection.execute(
                 "SELECT * FROM snapshots WHERE snapshot_id = ?", (snapshot_id,)
             ).fetchone()
@@ -235,13 +255,13 @@ class ManifestStore:
             query += " AND collector_name = ?"
             params.append(collector_name)
         query += " ORDER BY collector_name, relative_path"
-        with self._connect() as connection:
+        with self._transact() as connection:
             return connection.execute(query, tuple(params)).fetchall()
 
     def assert_snapshot_frozen(self, snapshot_id: str) -> None:
         snapshot = self.get_snapshot(snapshot_id)
         raw_root = Path(snapshot["raw_root"])
-        with self._connect() as connection:
+        with self._transact() as connection:
             rows = connection.execute(
                 "SELECT relative_path, content_sha256 FROM files WHERE snapshot_id = ?",
                 (snapshot_id,),
@@ -260,7 +280,7 @@ class ManifestStore:
 
     def start_run(self, snapshot_id: str, stage_name: str, collector_name: str) -> str:
         run_id = uuid.uuid4().hex
-        with self._connect() as connection:
+        with self._transact() as connection:
             connection.execute(
                 """
                 INSERT INTO runs (
@@ -282,7 +302,7 @@ class ManifestStore:
         return run_id
 
     def finish_run(self, run_id: str, status: str) -> None:
-        with self._connect() as connection:
+        with self._transact() as connection:
             connection.execute(
                 """
                 UPDATE runs
@@ -300,7 +320,7 @@ class ManifestStore:
         quarantined_rows: int,
         error_count: int,
     ) -> None:
-        with self._connect() as connection:
+        with self._transact() as connection:
             connection.execute(
                 """
                 UPDATE files
@@ -311,7 +331,7 @@ class ManifestStore:
             )
 
     def replace_row_errors(self, file_id: str, errors: Iterable[dict]) -> None:
-        with self._connect() as connection:
+        with self._transact() as connection:
             connection.execute("DELETE FROM row_errors WHERE file_id = ?", (file_id,))
             for index, error in enumerate(errors):
                 connection.execute(
@@ -333,7 +353,7 @@ class ManifestStore:
     def upsert_artifact(
         self, snapshot_id: str, artifact_kind: str, relative_path: str, row_count: int
     ) -> None:
-        with self._connect() as connection:
+        with self._transact() as connection:
             connection.execute(
                 """
                 INSERT INTO artifacts (
@@ -361,7 +381,7 @@ class ManifestStore:
             query += " AND artifact_kind = ?"
             params.append(artifact_kind)
         query += " ORDER BY artifact_kind, relative_path"
-        with self._connect() as connection:
+        with self._transact() as connection:
             return connection.execute(query, tuple(params)).fetchall()
 
     def _assert_snapshot_identity(

@@ -6,6 +6,7 @@ from typing import Dict, List, Sequence, Tuple
 from .evaluation import (
     accuracy,
     average_precision,
+    calibration_curve_data,
     expected_calibration_error,
     macro_f1,
     provenance_coverage,
@@ -81,6 +82,18 @@ def run_task_a_baselines(
     metadata_model.fit(metadata_train, y_train)
     metadata_probs = metadata_model.predict_proba(metadata_test)
 
+    feature_importance: list = []
+    feat_names = metadata_vectorizer.feature_names()
+    if metadata_model.weights and feat_names:
+        paired = sorted(
+            zip(feat_names, metadata_model.weights),
+            key=lambda kv: abs(kv[1]),
+            reverse=True,
+        )
+        feature_importance = [
+            {"feature": n, "weight": round(w, 6)} for n, w in paired[:20]
+        ]
+
     text_train_input = [_text_input(view) for view in train_views]
     text_test_input = [_text_input(view) for view in test_views]
     text_backend_used = text_backend
@@ -110,12 +123,15 @@ def run_task_a_baselines(
     fusion_model.fit(fusion_train, y_train)
     fusion_probs = fusion_model.predict_proba(fusion_test)
 
+    metadata_metrics = _ranking_metrics(y_test, metadata_probs, test_records)
+    metadata_metrics["feature_importance"] = feature_importance
+
     return [
         BaselineRun(
             model_name="metadata_logistic_baseline",
             task_name="task_a_" + horizon,
             backend_used="logistic",
-            metrics=_ranking_metrics(y_test, metadata_probs, test_records),
+            metrics=metadata_metrics,
         ),
         BaselineRun(
             model_name="abstract_encoder_baseline",
@@ -284,6 +300,7 @@ def _ranking_metrics(
         "Recall@1pct": round(recall_at_k(labels, probs, top_1pct), 4),
         "Recall@5pct": round(recall_at_k(labels, probs, top_5pct), 4),
         "ECE": round(expected_calibration_error(labels, probs), 4),
+        "calibration_curve": calibration_curve_data(labels, probs),
     }
     subfield_breakdown = {}
     for subfield in sorted({record.subfield for record in records}):

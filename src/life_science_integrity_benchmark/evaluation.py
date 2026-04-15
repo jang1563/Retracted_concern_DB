@@ -1,6 +1,6 @@
 """Metrics for ranking, calibration, and multilabel evaluation."""
 
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 
 def average_precision(labels: Sequence[int], scores: Sequence[float]) -> float:
@@ -79,6 +79,40 @@ def provenance_coverage(records) -> float:
         return 0.0
     covered = sum(1 for record in records if record.source_names and record.source_urls)
     return covered / len(records)
+
+
+def calibration_curve_data(
+    labels: Sequence[int], probs: Sequence[float], n_bins: int = 5
+) -> List[Dict[str, object]]:
+    """Return per-bin statistics for a reliability diagram.
+
+    Each bin covers an equal-width interval of predicted probability.  Empty
+    bins are omitted so callers can detect degenerate cases (e.g. all
+    predictions in one bin).
+    """
+    bins = []
+    for i in range(n_bins):
+        lo = i / n_bins
+        hi = (i + 1) / n_bins
+        in_bin = [
+            (p, l)
+            for p, l in zip(probs, labels)
+            if lo <= p < hi or (i == n_bins - 1 and p == 1.0)
+        ]
+        if not in_bin:
+            continue
+        bin_probs = [p for p, _ in in_bin]
+        bin_labels = [l for _, l in in_bin]
+        bins.append(
+            {
+                "bin_lower": round(lo, 4),
+                "bin_upper": round(hi, 4),
+                "mean_predicted": round(sum(bin_probs) / len(bin_probs), 4),
+                "fraction_positive": round(sum(bin_labels) / len(bin_labels), 4),
+                "count": len(bin_probs),
+            }
+        )
+    return bins
 
 
 def grouped_slice_counts(records) -> Dict[str, Dict[str, int]]:

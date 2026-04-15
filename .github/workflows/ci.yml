@@ -40,6 +40,7 @@ jobs:
           test -f artifacts/sample_release/leakage_report.json
           test -f artifacts/sample_release/task_a_baselines.json
           test -f artifacts/sample_release/task_a_robustness.json
+          test -f artifacts/sample_release/task_a_calibration_curves.svg
           test -f artifacts/sample_release/task_b_baseline.json
           test -f artifacts/sample_release/experiment_report.md
           test -f artifacts/site/index.html

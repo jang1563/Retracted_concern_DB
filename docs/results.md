@@ -55,6 +55,14 @@ Banned post-publication fields screened out of Task A features include `notice_s
 
 Task A publication-time feature set: `title`, `abstract`, `venue`, `publisher`, `publication_year`, `subfield`, `is_pubmed_indexed`, `openalex_life_science_score`, `references_count`, `author_history_signal_count`, `journal_history_signal_count`, `oa_status`, `authors`, `institutions`.
 
+## Metadata Baseline: Feature Importance
+
+The metadata logistic baseline exposes its top-20 learned weights under `feature_importance` in every `task_a_baselines.json` run entry. On the synthetic corpus the top predictors are venue indicator features (sparse but high-magnitude) followed by `oa_status`, `publication_year`, and `openalex_life_science_score`. Real-data importance rankings — where venue indicators generalise across thousands of venues and numeric features gain relative weight — will be meaningfully different.
+
+## Calibration Curves
+
+Every baseline run now includes a `calibration_curve` list (per-bin mean-predicted-probability vs. fraction-positive) alongside ECE. The demo also emits `artifacts/sample_release/task_a_calibration_curves.svg` — a 2×3 reliability diagram (horizons × models) with a perfect-calibration diagonal for reference. On the 16-record synthetic corpus the bins are sparse; the SVG is primarily a shape-of-output demonstration. With real data the reliability diagrams will be interpretable.
+
 ## Splits
 
 14 split manifests are produced per release: a primary time split and three grouped holdouts (author cluster, venue, publisher) for each of Task A 12m, Task A 36m, and Task B, plus noisy-date analysis splits.
@@ -170,7 +178,7 @@ artifacts/sample_release/
 
 ## Test Suite
 
-The repository ships with `tests/test_benchmark.py` covering dataset logic, label derivation, split construction, leakage auditing (including a seven-test sensitivity battery — pre-publication events, post-snapshot events, task-A feature-cutoff mismatch, future-censored author and journal history, each missing-provenance case, and a clean-corpus baseline), Task A cross-split robustness, baseline model fitting, site generation, ingest manifests, and the vendor-archive → raw-snapshot pipeline. All 27 tests pass on Python 3.13 with zero external dependencies.
+The repository ships with `tests/test_benchmark.py` covering dataset logic, label derivation, split construction, leakage auditing (including a seven-test sensitivity battery — pre-publication events, post-snapshot events, task-A feature-cutoff mismatch, future-censored author and journal history, each missing-provenance case, and a clean-corpus baseline), Task A cross-split robustness, baseline model fitting (including feature-importance structure and calibration-curve bin validation), SVG calibration-diagram generation, site generation, ingest manifests, and the vendor-archive → raw-snapshot pipeline. All 30 tests pass on Python 3.13 with zero external dependencies.
 
 ## What Real-Data Results Will Add
 

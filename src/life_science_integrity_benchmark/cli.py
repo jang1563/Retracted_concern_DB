@@ -36,7 +36,7 @@ from .ingest import (
 )
 from .manifest import ManifestStore
 from .materialize import materialize_canonical_snapshot
-from .reporting import build_experiment_report
+from .reporting import build_calibration_svg, build_experiment_report
 from .site import build_site, export_internal_curation_queue
 from .splits import build_split_manifests
 from .utils import read_json, read_jsonl, write_json
@@ -345,6 +345,10 @@ def _train_task_a(records, manifests, release_dir: Path, text_backend: str):
     robustness_path = release_dir / "task_a_robustness.json"
     write_json(robustness_path, robustness_payload)
     print("task_a_robustness:", robustness_path)
+
+    svg_path = release_dir / "task_a_calibration_curves.svg"
+    svg_path.write_text(build_calibration_svg(outputs), encoding="utf-8")
+    print("task_a_calibration_curves:", svg_path)
 
     return outputs
 
