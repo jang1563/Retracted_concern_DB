@@ -2,6 +2,7 @@
 
 import html
 import json
+from datetime import date
 from pathlib import Path
 from typing import List
 from urllib.parse import urlparse
@@ -13,6 +14,8 @@ from .utils import slugify, write_json
 
 def build_site(records: List[BenchmarkRecord], output_dir: Path, summary: dict) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
+    site_summary = dict(summary)
+    site_summary.setdefault("site_generated_date", date.today().isoformat())
     stale_internal_file = output_dir / "curation_queue.html"
     if stale_internal_file.exists():
         stale_internal_file.unlink()
@@ -28,9 +31,9 @@ def build_site(records: List[BenchmarkRecord], output_dir: Path, summary: dict) 
         path.write_text(_record_page(record), encoding="utf-8")
 
     (output_dir / "styles.css").write_text(_styles_css(), encoding="utf-8")
-    (output_dir / "index.html").write_text(_index_page(public_records, summary), encoding="utf-8")
-    (output_dir / "policy.html").write_text(_policy_page(summary), encoding="utf-8")
-    (output_dir / "changes.html").write_text(_changes_page(summary), encoding="utf-8")
+    (output_dir / "index.html").write_text(_index_page(public_records, site_summary), encoding="utf-8")
+    (output_dir / "policy.html").write_text(_policy_page(site_summary), encoding="utf-8")
+    (output_dir / "changes.html").write_text(_changes_page(site_summary), encoding="utf-8")
 
     records_json = [
         {
@@ -85,10 +88,10 @@ def _index_page(records: List[BenchmarkRecord], summary: dict) -> str:
     status_options = _status_options(records)
     stats = "".join(
         [
-            _summary_stat("Snapshot", summary.get("snapshot_date", "unknown")),
+            _summary_stat("Data snapshot", summary.get("snapshot_date", "unknown")),
+            _summary_stat("Site updated", summary.get("site_generated_date", "unknown")),
             _summary_stat("Public records", len(records)),
             _summary_stat("Curator-gated", summary.get("curated_review_count", 0)),
-            _summary_stat("Total release records", summary.get("record_count", len(records))),
         ]
     )
     search_blob = html.escape(
@@ -263,7 +266,7 @@ def _record_page(record: BenchmarkRecord) -> str:
       <p class="lede">%s</p>
       <div class="record-facts">
         <span>%s</span>
-        <span>Snapshot %s</span>
+        <span>Data snapshot %s</span>
         <span>%s</span>
       </div>
       <div class="tags">%s</div>
@@ -366,7 +369,11 @@ def _policy_page(summary: dict) -> str:
       </ul>
       <dl class="detail-list compact">
         <div>
-          <dt>Snapshot</dt>
+          <dt>Data snapshot</dt>
+          <dd>%s</dd>
+        </div>
+        <div>
+          <dt>Site updated</dt>
           <dd>%s</dd>
         </div>
         <div>
@@ -382,6 +389,7 @@ def _policy_page(summary: dict) -> str:
         _site_nav(current="policy"),
         html.escape(SITE_DISCLAIMER),
         html.escape(summary["snapshot_date"]),
+        html.escape(summary["site_generated_date"]),
         html.escape(POLICY_CONTACT),
     )
 
@@ -415,7 +423,11 @@ def _changes_page(summary: dict) -> str:
       </ul>
       <dl class="detail-list compact">
         <div>
-          <dt>Snapshot</dt>
+          <dt>Data snapshot</dt>
+          <dd>%s</dd>
+        </div>
+        <div>
+          <dt>Site updated</dt>
           <dd>%s</dd>
         </div>
         <div>
@@ -430,6 +442,7 @@ def _changes_page(summary: dict) -> str:
 """ % (
         _site_nav(current="changes"),
         html.escape(summary["snapshot_date"]),
+        html.escape(summary["site_generated_date"]),
         summary["auto_publish_count"],
     )
 
