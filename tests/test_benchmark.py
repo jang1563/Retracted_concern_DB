@@ -1235,6 +1235,7 @@ class BenchmarkTests(unittest.TestCase):
             raw_root = root / "data" / "raw" / "snapshot_early_scope"
             (raw_root / "openalex").mkdir(parents=True)
             (raw_root / "official_notices").mkdir(parents=True)
+            (raw_root / "pubmed").mkdir(parents=True)
             write_jsonl(
                 raw_root / "openalex" / "works.jsonl.gz",
                 [
@@ -1271,6 +1272,18 @@ class BenchmarkTests(unittest.TestCase):
                         },
                         "authorships": [],
                     },
+                    {
+                        "doi": "10.2300/scope.pubmed",
+                        "title": "Weak topic row with PubMed DOI",
+                        "abstract": "PubMed-linked rows must survive early filtering.",
+                        "publication_date": "2024-04-15",
+                        "type": "article",
+                        "primary_topic": {
+                            "subfield": {"display_name": "Biology"},
+                            "domain": {"display_name": "Life Sciences"},
+                        },
+                        "authorships": [],
+                    },
                 ],
             )
             write_jsonl(
@@ -1285,6 +1298,23 @@ class BenchmarkTests(unittest.TestCase):
                     }
                 ],
             )
+            (raw_root / "pubmed" / "pubmed.xml").write_text(
+                """<PubmedArticleSet>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID>22222222</PMID>
+      <Article>
+        <ELocationID EIdType="doi">10.2300/scope.pubmed</ELocationID>
+      </Article>
+    </MedlineCitation>
+    <PubmedData>
+      <ArticleIdList><ArticleId IdType="doi">10.2300/scope.pubmed</ArticleId></ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+</PubmedArticleSet>
+""",
+                encoding="utf-8",
+            )
 
             register_snapshot(
                 snapshot_id="snapshot_early_scope",
@@ -1298,8 +1328,11 @@ class BenchmarkTests(unittest.TestCase):
                 root_dir=root,
                 output_path=allowlist_path,
             )
-            self.assertEqual(allowlist["doi_count"], 1)
-            self.assertEqual(allowlist_path.read_text(encoding="utf-8").strip(), "10.2300/scope.notice")
+            self.assertEqual(allowlist["doi_count"], 2)
+            self.assertEqual(
+                allowlist_path.read_text(encoding="utf-8").splitlines(),
+                ["10.2300/scope.notice", "10.2300/scope.pubmed"],
+            )
 
             original_filter = os.environ.get("LSIB_OPENALEX_EARLY_SCOPE_FILTER")
             original_allowlist = os.environ.get("LSIB_OPENALEX_SCOPE_DOI_ALLOWLIST")
@@ -1317,7 +1350,7 @@ class BenchmarkTests(unittest.TestCase):
                 else:
                     os.environ["LSIB_OPENALEX_SCOPE_DOI_ALLOWLIST"] = original_allowlist
 
-            self.assertEqual(ingest_result["normalized_rows"], 2)
+            self.assertEqual(ingest_result["normalized_rows"], 3)
             self.assertEqual(ingest_result["quarantined_rows"], 0)
             self.assertEqual(ingest_result["scope_skipped_rows"], 1)
             store = ManifestStore(root / "data" / "manifests" / "ingest.sqlite3")
@@ -1339,7 +1372,7 @@ class BenchmarkTests(unittest.TestCase):
             canonical_articles = read_jsonl(paths["articles_dir"] / "part-00000.jsonl.gz")
             self.assertEqual(
                 {row["doi"] for row in canonical_articles},
-                {"10.2300/scope.keep", "10.2300/scope.notice"},
+                {"10.2300/scope.keep", "10.2300/scope.notice", "10.2300/scope.pubmed"},
             )
 
     def test_pubmed_boolean_strings_are_coerced_before_materialize_join(self):

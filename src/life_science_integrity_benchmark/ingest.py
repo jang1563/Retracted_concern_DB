@@ -1,8 +1,10 @@
 """Snapshot registration, collector ingest, and legacy compatibility wrappers."""
 
 import hashlib
+import html
 import json
 import os
+import re
 import time
 from collections import Counter
 from pathlib import Path
@@ -60,6 +62,14 @@ RAW_TEMPLATE_LAYOUT = {
         "is_pubmed_indexed": True,
     },
 }
+
+
+PUBMED_XML_DOI_RE = re.compile(
+    r"<(?:ArticleId|ELocationID)\b[^>]*(?:IdType|EIdType)\s*=\s*['\"]doi['\"][^>]*>"
+    r"(.*?)"
+    r"</(?:ArticleId|ELocationID)>",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def scaffold_real_source_layout(raw_dir: Path) -> Dict[str, Path]:
@@ -365,6 +375,11 @@ def build_openalex_scope_allowlist(
         collector = get_collector(collector_name)
         files = collector.discover_files(Path(snapshot["raw_root"]), store, snapshot_id)
         for file_meta in files:
+            if collector_name == PUBMED_COLLECTOR and _is_pubmed_xml_file(file_meta.absolute_path):
+                for doi in _iter_pubmed_xml_dois(file_meta.absolute_path):
+                    dois.add(doi)
+                    doi_counts_by_collector[collector_name] += 1
+                continue
             for line_number, raw_record in collector.iter_raw_records(file_meta):
                 result = collector.normalize_record(
                     raw_record,
@@ -395,6 +410,40 @@ def build_openalex_scope_allowlist(
         "doi_count": len(dois),
         "doi_counts_by_collector": dict(doi_counts_by_collector),
     }
+
+
+def _is_pubmed_xml_file(path: Path) -> bool:
+    name = Path(path).name.lower()
+    return name.endswith(".xml") or name.endswith(".xml.gz")
+
+
+def _iter_pubmed_xml_dois(path: Path):
+    """Stream DOI tags from PubMed XML without materializing article records."""
+
+    tail = ""
+    overlap_chars = 65536
+    with open_text(path, "rt") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            text = tail + chunk
+            cutoff = max(0, len(text) - overlap_chars)
+            for match in PUBMED_XML_DOI_RE.finditer(text):
+                if match.end() > cutoff:
+                    break
+                doi = normalize_doi(_strip_xml_text(match.group(1)))
+                if doi:
+                    yield doi
+            tail = text[cutoff:]
+    for match in PUBMED_XML_DOI_RE.finditer(tail):
+        doi = normalize_doi(_strip_xml_text(match.group(1)))
+        if doi:
+            yield doi
+
+
+def _strip_xml_text(value: str) -> str:
+    return re.sub(r"<[^>]+>", "", html.unescape(value or "")).strip()
 
 
 def normalize_real_source_exports(raw_dir: Path, normalized_dir: Path) -> Dict[str, Path]:
