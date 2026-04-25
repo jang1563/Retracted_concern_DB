@@ -1,9 +1,14 @@
-name: Deploy evidence-browser demo to GitHub Pages
+name: Deploy real-data evidence browser to GitHub Pages
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional GitHub release tag containing open_data_site*.zip or open_data_release*.zip"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -25,22 +30,94 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Build sample release and static site
+      - name: Resolve real-data static site
         env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || '' }}
           PYTHONPATH: src
-        run: python -m life_science_integrity_benchmark.cli demo
+        run: |
+          set -euo pipefail
+
+          site_dir="artifacts/open_data_site"
+          release_dir="artifacts/open_data_release"
+          download_dir="artifacts/downloads"
+
+          restore_zip_to_dir() {
+            zip_path="$1"
+            target_dir="$2"
+            expected_leaf="$3"
+            tmp_dir="$download_dir/unpacked"
+            rm -rf "$tmp_dir"
+            mkdir -p "$tmp_dir" "$target_dir"
+            unzip -q "$zip_path" -d "$tmp_dir"
+
+            if [ -f "$tmp_dir/index.html" ] || [ -f "$tmp_dir/benchmark_v1.jsonl" ]; then
+              cp -R "$tmp_dir"/. "$target_dir"/
+            elif [ -d "$tmp_dir/$expected_leaf" ]; then
+              cp -R "$tmp_dir/$expected_leaf"/. "$target_dir"/
+            elif [ -d "$tmp_dir/artifacts/$expected_leaf" ]; then
+              cp -R "$tmp_dir/artifacts/$expected_leaf"/. "$target_dir"/
+            else
+              echo "::error::Could not find $expected_leaf contents inside $zip_path"
+              exit 1
+            fi
+          }
+
+          if [ ! -f "$site_dir/index.html" ] && [ -n "$RELEASE_TAG" ]; then
+            mkdir -p "$download_dir"
+            gh release download "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "open_data_site*.zip" \
+              --dir "$download_dir" || true
+            if ls "$download_dir"/open_data_site*.zip >/dev/null 2>&1; then
+              restore_zip_to_dir "$(ls "$download_dir"/open_data_site*.zip | head -n 1)" "$site_dir" "open_data_site"
+            fi
+          fi
+
+          if [ ! -f "$site_dir/index.html" ] && [ -n "$RELEASE_TAG" ]; then
+            mkdir -p "$download_dir"
+            gh release download "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "open_data_release*.zip" \
+              --dir "$download_dir" || true
+            if ls "$download_dir"/open_data_release*.zip >/dev/null 2>&1; then
+              restore_zip_to_dir "$(ls "$download_dir"/open_data_release*.zip | head -n 1)" "$release_dir" "open_data_release"
+            fi
+          fi
+
+          if [ ! -f "$site_dir/index.html" ] && [ -f "$release_dir/benchmark_v1.jsonl" ]; then
+            python -m life_science_integrity_benchmark.cli \
+              --release-dir "$release_dir" \
+              --site-dir "$site_dir" \
+              build-site
+          fi
+
+          if [ ! -f "$site_dir/index.html" ]; then
+            echo "::error::Real-data Pages artifact missing. Harvest the Cayuga release into artifacts/open_data_site, commit/upload that artifact, or run this workflow with a release_tag containing open_data_site*.zip or open_data_release*.zip."
+            exit 1
+          fi
+
+          echo "SITE_DIR=$site_dir" >> "$GITHUB_ENV"
+
+      - name: Verify static site contract
+        run: |
+          test -f "$SITE_DIR/index.html"
+          test -f "$SITE_DIR/policy.html"
+          test -f "$SITE_DIR/changes.html"
+          test -f "$SITE_DIR/records.json"
+          test ! -f "$SITE_DIR/curation_queue.html"
 
       - name: Add Pages landing note
         run: |
-          cat > artifacts/site/_github_pages_note.html <<'EOF'
-          <!-- Deployed automatically from the demo build.
+          cat > "$SITE_DIR/_github_pages_note.html" <<'EOF'
+          <!-- Deployed automatically from the real-data evidence-browser artifact.
                Source: https://github.com/jang1563/Retracted_concern_DB -->
           EOF
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: artifacts/site
+          path: ${{ env.SITE_DIR }}
 
   deploy:
     needs: build
