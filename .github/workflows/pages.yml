@@ -3,6 +3,8 @@ name: Deploy real-data evidence browser to GitHub Pages
 on:
   push:
     branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -33,7 +35,7 @@ jobs:
       - name: Resolve real-data static site
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag || '' }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag || '' }}
           PYTHONPATH: src
         run: |
           set -euo pipefail
@@ -93,7 +95,7 @@ jobs:
           fi
 
           if [ ! -f "$site_dir/index.html" ]; then
-            echo "::error::Real-data Pages artifact missing. Harvest the Cayuga release into artifacts/open_data_site, commit/upload that artifact, or run this workflow with a release_tag containing open_data_site*.zip or open_data_release*.zip."
+            echo "::error::Real-data Pages artifact missing. Harvest the Cayuga release into artifacts/open_data_site, upload open_data_site*.zip or open_data_release*.zip to a GitHub release, or run this workflow with a release_tag that contains one of those assets."
             exit 1
           fi
 
