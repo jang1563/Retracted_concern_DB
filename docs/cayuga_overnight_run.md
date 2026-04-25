@@ -91,7 +91,12 @@ This script submits only:
 ./scripts/cayuga/collect_morning_status.sh "$RUN_ROOT"
 ```
 
-This script bundles job id, sentinel files, `sacct` output, checksum uniqueness, and a tail of recent logs into `artifacts/morning_status_report.txt`.
+This script bundles job ids, per-artifact effective status, `sacct` output,
+checksum uniqueness, and a tail of recent logs into
+`artifacts/morning_status_report.txt`. Its `artifact_status` lines cover
+`preflight`, `sample_stress`, `real_release`, `public_vendor_collection`, and
+`open_data_release`, with `FAILED` taking precedence over `COMPLETED` so stale
+success markers do not hide rerun failures.
 
 ## What each job does
 
@@ -124,23 +129,24 @@ This script bundles job id, sentinel files, `sacct` output, checksum uniqueness,
 ```bash
 RUN_ROOT="<hpc-scratch-root>/lsib/<run-id>"
 
+./scripts/cayuga/collect_morning_status.sh "$RUN_ROOT"
+
 sacct -j "$(cat "$RUN_ROOT/artifacts/preflight/job_id.txt")","$(cat "$RUN_ROOT/artifacts/sample_stress/job_id.txt")" \
   --format=JobID,JobName,State,Elapsed,MaxRSS
 
-tail -n 100 "$RUN_ROOT/logs/"*.out
-test -f "$RUN_ROOT/artifacts/sample_stress/COMPLETED" && echo COMPLETED
-test ! -f "$RUN_ROOT/artifacts/sample_stress/FAILED" && echo NO_FAILURE_FLAG
+grep '^artifact_status' "$RUN_ROOT/artifacts/morning_status_report.txt"
+grep '^current_step' "$RUN_ROOT/artifacts/morning_status_report.txt"
 wc -l "$RUN_ROOT/artifacts/sample_stress/checksums.tsv"
 cut -f2-4 "$RUN_ROOT/artifacts/sample_stress/checksums.tsv" | sort | uniq | wc -l
 ```
 
 Success means:
 
-- preflight succeeded
-- sample stress succeeded
+- `artifact_status	preflight	COMPLETED`
+- `artifact_status	sample_stress	COMPLETED`
 - `checksums.tsv` has at least 2 rows
 - checksum tuple unique count is `1`
-- no `FAILED` sentinel exists in `artifacts/sample_stress/`
+- no artifact that matters is reporting `FAILED`
 
 ## Real-data readiness
 
@@ -189,6 +195,21 @@ To watch real-ingest status from the local machine:
 ```bash
 ./scripts/cayuga/watch_real_ingest_from_local.sh "$REMOTE_HOST" "$RUN_ROOT" 60 20
 ```
+
+Current submit wrappers also clear stale sentinel files immediately after a new
+`sbatch` succeeds, so reruns start with a clean marker state.
+
+For the open-data downstream release path used by the current v0.2 build:
+
+```bash
+./scripts/cayuga/finalize_open_data_release_from_local.sh "$REMOTE_HOST" "$RUN_ROOT"
+./scripts/cayuga/watch_open_data_release_from_local.sh "$REMOTE_HOST" "$RUN_ROOT" 300
+```
+
+These local wrappers are the recommended way to monitor or finalize the release
+because they select a compatible Cayuga Slurm client before calling `squeue` or
+`sacct`. On `cayuga-phobos`, the default `squeue` in `PATH` may be too new and
+return an incompatible-protocol error even while the job is healthy.
 
 To watch public-source collection status from the local machine:
 

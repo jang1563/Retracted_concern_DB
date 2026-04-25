@@ -6,6 +6,7 @@ body:
     attributes:
       value: |
         Thanks for taking the time. Please do not use this template to dispute a specific record's integrity notice — that goes through the dispute contact on the public release's site page.
+        Security issues, rights leaks, private curator-note leaks, and curator-gated signal leaks should be reported through SECURITY.md before opening a public issue.
   - type: input
     id: version
     attributes:
@@ -18,7 +19,7 @@ body:
     id: python
     attributes:
       label: Python version
-      placeholder: "3.11"
+      placeholder: "3.8, 3.11, or 3.13"
     validations:
       required: true
   - type: textarea
@@ -49,6 +50,8 @@ body:
       label: Pre-flight
       options:
         - label: I am not reporting a record-level integrity dispute (those go through the dispute contact on the site).
+          required: true
+        - label: I am not reporting a security issue, rights leak, private curator-note leak, or curator-gated signal leak (those go through SECURITY.md).
           required: true
         - label: I have read CONTRIBUTING.md.
           required: false

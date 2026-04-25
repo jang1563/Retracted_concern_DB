@@ -1,6 +1,6 @@
 # Real-Data Results (v0.2 draft)
 
-> **Status: placeholder.** This document is a skeleton prepared while the real-data pipeline is still running on Cayuga (job `2789241`, submitted 2026-04-13). Numbers here will be replaced with the output of `scripts/cayuga/harvest_open_data_release_to_local.sh` when the job finishes. Until then, the authoritative demo numbers are in [results.md](results.md).
+> **Status: placeholder.** This document is a skeleton prepared while the real-data pipeline is still running on Cayuga. The active downstream job ID lives in `$RUN_ROOT/artifacts/open_data_release/job_id.txt` and may change across resubmissions, so prefer `scripts/cayuga/finalize_open_data_release_from_local.sh` or `scripts/cayuga/watch_open_data_release_from_local.sh` over a hardcoded historical job number. Numbers here will be replaced from the harvested `artifacts/open_data_release/` bundle when the job finishes. Until then, the authoritative demo numbers are in [results.md](results.md).
 
 ## Source Of Numbers
 
@@ -20,10 +20,22 @@ On Cayuga, once the raw snapshot at `$RUN_ROOT/raw/public_open_data_snapshot/` i
 
 This runs `register → ingest → materialize → validate → build-core → build-splits → audit-leakage → train-task-a → train-task-b → build-site → build-report` against the staged raw snapshot, with `--time=5-00:00:00`.
 
-After completion, harvest the release to your local repo:
+After completion, the simplest local command is:
+
+```bash
+./scripts/cayuga/finalize_open_data_release_from_local.sh cayuga-phobos "$RUN_ROOT"
+```
+
+That helper checks the remote job with a compatible Slurm client, harvests the release once the `COMPLETED` marker exists, and rebuilds this document locally.
+
+Manual equivalent:
 
 ```bash
 ./scripts/cayuga/harvest_open_data_release_to_local.sh cayuga-phobos "$RUN_ROOT"
+
+PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli \
+  --release-dir artifacts/open_data_release \
+  build-results-v0-2
 ```
 
 ## Snapshot Summary
@@ -58,25 +70,28 @@ _TODO: confirm **PASS** status and paste counts from `leakage_report.json`._
 
 ## Task A Baselines
 
-_TODO: replace with real metrics. Three models per horizon as in the synthetic demo._
+_TODO: replace with real metrics. Three models per horizon as in the synthetic demo.
+Use `task_a_baselines.json` for the main table, `task_a_robustness.json` for grouped holdouts,
+and the generated SVGs for visual summaries (`task_a_calibration_curves.svg`,
+`task_a_pr_curves.svg`)._
 
 **Task A 12m:**
 
-| Model | AUPRC | Recall@1% | Recall@5% | ECE |
-| --- | --- | --- | --- | --- |
-| metadata_logistic | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| abstract_encoder (hashing) | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| metadata + text fusion | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| Model | AUPRC | AUPRC 95% CI | Precision@1% | Recall@1% | Precision@5% | Recall@5% | ECE |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| metadata_logistic | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| abstract_encoder (hashing) | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| metadata + text fusion | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
 
 **Task A 36m:**
 
-| Model | AUPRC | Recall@1% | Recall@5% | ECE |
-| --- | --- | --- | --- | --- |
-| metadata_logistic | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| abstract_encoder (hashing) | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| metadata + text fusion | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| Model | AUPRC | AUPRC 95% CI | Precision@1% | Recall@1% | Precision@5% | Recall@5% | ECE |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| metadata_logistic | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| abstract_encoder (hashing) | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| metadata + text fusion | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
 
-Subfield-sliced AUPRC and robustness-split numbers: _TBD — pull from `task_a_baselines.json` and `task_a_robustness.json` (the latter covers all 8 manifests: primary + author_cluster / venue / publisher holdouts × 2 horizons)._
+Subfield-sliced AUPRC and robustness-split numbers: _TBD — pull from `task_a_baselines.json` and `task_a_robustness.json` (the latter covers the primary Task A splits plus any grouped holdouts that pass minimum-size and label-diversity checks)._
 
 ## Task B Baseline
 
@@ -105,4 +120,4 @@ See [results.md](results.md) for the synthetic numbers. The demo was a shape-of-
 
 ## Files Delivered By The Run
 
-On successful completion, `artifacts/open_data_release/` and `artifacts/open_data_site/` will contain the same file set as the synthetic demo (`benchmark_v1.jsonl`, `summary.json`, `splits.json`, `leakage_report.json`, `task_a_baselines.json`, `task_b_baseline.json`, `adjudication_queue.csv`, `experiment_report.md`, site HTML pages), derived from real data instead of the bundled sample.
+On successful completion, `artifacts/open_data_release/` and `artifacts/open_data_site/` will contain the same file set as the synthetic demo plus the newer Task A analysis artifacts (`task_a_robustness.json`, `task_a_calibration_curves.svg`, `task_a_pr_curves.svg`) and machine-readable reporting artifacts (`experiment_report.json`, `internal_curation_queue.json`), derived from real data instead of the bundled sample.

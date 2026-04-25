@@ -23,6 +23,7 @@
   - author cluster holdout
   - venue holdout
   - publisher holdout
+- Grouped holdouts are emitted only when the held-out group is large enough to interpret; Task A holdouts also require both positive and negative labels in the held-out group.
 
 ## Metrics
 

@@ -6,6 +6,7 @@ body:
     attributes:
       value: |
         Sources that cannot be integrated as rights-safe (link-only if required by license) will not be merged. Please read `docs/source_rights_matrix.md` before filling this out.
+        Public issues must only include rights-safe metadata and links. Do not paste full text, images, private correspondence, license-restricted fields, or unreviewed allegations about named people.
   - type: input
     id: source-name
     attributes:
@@ -52,7 +53,7 @@ body:
     id: sample
     attributes:
       label: Sample records
-      description: Rights permitting, paste 2-3 example records (redact identifying details if needed).
+      description: Public, rights-safe metadata/links only. Do not paste full text, images, private correspondence, license-restricted fields, or unreviewed allegations about named people.
       render: text
   - type: textarea
     id: rationale
@@ -67,6 +68,8 @@ body:
       label: Confirmations
       options:
         - label: This source can be integrated in a rights-safe way (link-only is fine).
+          required: true
+        - label: Any sample content I posted is rights-safe public metadata/links only and contains no private material or unreviewed allegations about named people.
           required: true
         - label: I understand non-notice external signals are curator-gated and do not auto-publish to the site.
           required: true

@@ -25,7 +25,13 @@ fi
 
 REMOTE_HOST="$1"
 REMOTE_RUN_ROOT="$2"
-LOCAL_DEST_ROOT="${3:-$(cd "$(dirname "$0")/../.." && pwd)}"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+LOCAL_DEST_ROOT="${3:-$REPO_ROOT}"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/common_python_env.sh"
+SSH_BIN="${SSH_BIN:-ssh}"
+RSYNC_BIN="${RSYNC_BIN:-rsync}"
+lsib_require_python_bin "${PYTHON_BIN:-}"
 
 REMOTE_RELEASE="$REMOTE_RUN_ROOT/artifacts/open_data_release"
 REMOTE_SITE="$REMOTE_RUN_ROOT/artifacts/open_data_site"
@@ -33,10 +39,17 @@ LOCAL_RELEASE="$LOCAL_DEST_ROOT/artifacts/open_data_release"
 LOCAL_SITE="$LOCAL_DEST_ROOT/artifacts/open_data_site"
 
 echo "== Checking remote completion marker =="
-if ! ssh -o ConnectTimeout=30 "$REMOTE_HOST" "test -f '$REMOTE_RELEASE/COMPLETED'"; then
+if "$SSH_BIN" -o ConnectTimeout=30 "$REMOTE_HOST" "test -f '$REMOTE_RELEASE/FAILED'"; then
+  echo "FAILED marker found at $REMOTE_HOST:$REMOTE_RELEASE/FAILED" >&2
+  echo "failed_step on remote:" >&2
+  "$SSH_BIN" -o ConnectTimeout=30 "$REMOTE_HOST" "cat '$REMOTE_RELEASE/failed_step.txt' 2>/dev/null || echo '(no failed_step.txt)'" >&2
+  echo "Aborting harvest — the release artifact is marked failed." >&2
+  exit 1
+fi
+if ! "$SSH_BIN" -o ConnectTimeout=30 "$REMOTE_HOST" "test -f '$REMOTE_RELEASE/COMPLETED'"; then
   echo "COMPLETED marker not found at $REMOTE_HOST:$REMOTE_RELEASE/COMPLETED" >&2
   echo "current_step on remote:" >&2
-  ssh -o ConnectTimeout=30 "$REMOTE_HOST" "cat '$REMOTE_RELEASE/current_step.txt' 2>/dev/null || echo '(no current_step.txt)'" >&2
+  "$SSH_BIN" -o ConnectTimeout=30 "$REMOTE_HOST" "cat '$REMOTE_RELEASE/current_step.txt' 2>/dev/null || echo '(no current_step.txt)'" >&2
   echo "Aborting harvest — the job has not yet finished." >&2
   exit 1
 fi
@@ -45,13 +58,13 @@ echo "ok"
 mkdir -p "$LOCAL_RELEASE" "$LOCAL_SITE"
 
 echo "== rsync release =="
-rsync -az --delete "$REMOTE_HOST:$REMOTE_RELEASE/" "$LOCAL_RELEASE/"
+"$RSYNC_BIN" -az --delete "$REMOTE_HOST:$REMOTE_RELEASE/" "$LOCAL_RELEASE/"
 echo "== rsync site =="
-rsync -az --delete "$REMOTE_HOST:$REMOTE_SITE/" "$LOCAL_SITE/"
+"$RSYNC_BIN" -az --delete "$REMOTE_HOST:$REMOTE_SITE/" "$LOCAL_SITE/"
 
 echo
 echo "== Release summary =="
-python3 - <<PY
+"$PYTHON_BIN" - <<PY
 import json, sys
 from pathlib import Path
 
@@ -72,6 +85,12 @@ summary = load("summary.json")
 leakage = load("leakage_report.json")
 task_a = load("task_a_baselines.json")
 task_b = load("task_b_baseline.json")
+
+def fmt(value, spec):
+    try:
+        return format(float(value), spec)
+    except (TypeError, ValueError):
+        return "n/a"
 
 if summary:
     print("Snapshot date:        ", summary.get("snapshot_date"))
@@ -109,14 +128,25 @@ def dump_task_a(horizon):
     print(f"Task A {horizon}:")
     for r in runs:
         m = r.get("metrics", {})
-        print(f"  {r.get('model_name'):32s} AUPRC={m.get('AUPRC'):.4g}  R@1%={m.get('Recall@1pct'):.3g}  R@5%={m.get('Recall@5pct'):.3g}  ECE={m.get('ECE'):.3g}")
+        print(
+            f"  {r.get('model_name'):32s} "
+            f"AUPRC={fmt(m.get('AUPRC'), '.4g')}  "
+            f"R@1%={fmt(m.get('Recall@1pct'), '.3g')}  "
+            f"R@5%={fmt(m.get('Recall@5pct'), '.3g')}  "
+            f"ECE={fmt(m.get('ECE'), '.3g')}"
+        )
 
 dump_task_a("task_a_12m")
 dump_task_a("task_a_36m")
 
 if task_b:
     m = task_b.get("metrics", {})
-    print(f"Task B:                 acc={m.get('notice_status_accuracy'):.3g}  macroF1={m.get('tag_macro_f1'):.3g}  prov_cov={m.get('provenance_coverage'):.3g}")
+    print(
+        "Task B:                 "
+        f"acc={fmt(m.get('notice_status_accuracy'), '.3g')}  "
+        f"macroF1={fmt(m.get('tag_macro_f1'), '.3g')}  "
+        f"prov_cov={fmt(m.get('provenance_coverage'), '.3g')}"
+    )
 
 print()
 print("Files:")

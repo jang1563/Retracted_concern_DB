@@ -3,7 +3,7 @@
 [![CI](https://github.com/jang1563/Retracted_concern_DB/actions/workflows/ci.yml/badge.svg)](https://github.com/jang1563/Retracted_concern_DB/actions/workflows/ci.yml)
 [![Pages](https://github.com/jang1563/Retracted_concern_DB/actions/workflows/pages.yml/badge.svg)](https://jang1563.github.io/Retracted_concern_DB/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.11%20%7C%203.13-blue.svg)](#)
+[![Python](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.11%20%7C%203.13-blue.svg)](#)
 
 **Live demo:** [jang1563.github.io/Retracted_concern_DB](https://jang1563.github.io/Retracted_concern_DB/) — the evidence browser built from the synthetic sample corpus, auto-deployed from every commit to `main`.
 
@@ -11,7 +11,15 @@ A **triage-benchmark harness** for ranking life-science papers for human integri
 
 > **This is not a fraud detector.** It does not determine misconduct. It ranks papers for human reviewers and aggregates evidence with explicit rights and provenance handling. Every downstream decision requires a named human reviewer. See [ETHICS.md](ETHICS.md).
 
-Status: **v0.1 scaffold.** The full stack runs end-to-end on synthetic sample data — 20 unit tests pass, the `demo` pipeline produces a complete release + static site in seconds, and a `leakage_report.json` clean of all 11 banned post-publication field classes. A real-data release built from OpenAlex, Retraction Watch, and PubMed is in progress; real numbers will land in a tagged release once the ingest completes. See [docs/results.md](docs/results.md) for the current demo numbers.
+<!-- LSIB_STATUS_START -->
+Status: **v0.1 scaffold, v0.2 real-data release in progress.** The full stack runs end-to-end on synthetic sample data — 78 tests pass, the `demo` pipeline produces a complete release + static site in seconds, and the release artifacts now include validity-gated grouped-holdout robustness runs, calibration curves, PR curves, operating-point metrics, and bootstrap AUPRC confidence intervals. A real-data release built from OpenAlex, Retraction Watch, and PubMed is currently running on Cayuga; real numbers will land in a tagged release once the downstream job completes. See [docs/results.md](docs/results.md) for the current demo numbers and [docs/results_v0.2.md](docs/results_v0.2.md) for the real-data results draft.
+<!-- LSIB_STATUS_END -->
+
+<!-- LSIB_RELEASE_SNAPSHOT_START -->
+## Release Snapshot
+
+The real-data open-data-only release is still running on Cayuga. When it completes, this section will be replaced with headline release metrics generated from the harvested `artifacts/open_data_release/` bundle. Until then, see [docs/results.md](docs/results.md) for the synthetic demo numbers and [docs/results_v0.2.md](docs/results_v0.2.md) for the real-data results draft.
+<!-- LSIB_RELEASE_SNAPSHOT_END -->
 
 ---
 
@@ -92,9 +100,9 @@ A clean `demo` run on the 16-record synthetic corpus produces:
 
 - **Benchmark release** — `benchmark_v1.jsonl` + `.csv`, 16 records, snapshot 2026-04-09, 6 public + 5 curator-review + 5 none-known.
 - **Leakage audit** — **PASS** with zero violations across 11 banned field classes and 14 publication-time Task A features. See [leakage_report.json](artifacts/sample_release/leakage_report.json) after running the demo.
-- **14 split manifests** — primary time split + author-cluster / venue / publisher holdouts × Task A 12m, 36m, Task B.
-- **Task A baselines** — 3 models × 2 horizons × all metrics (AUPRC, Recall@1%, Recall@5%, ECE, subfield-AUPRC). On the 36m horizon: metadata_logistic AUPRC=0.92, text hashing 0.81, fusion 0.92.
-- **Task A robustness** — every baseline also runs across 8 split manifests (primary + author-cluster / venue / publisher holdouts × 2 horizons), producing `task_a_robustness.json`. This is how generalization-under-distributional-shift gets measured instead of just claimed.
+- **11 split manifests** — primary time split + validity-gated venue / publisher holdouts for Task A 12m, Task A 36m, and Task B, plus noisy-date Task A analysis splits. One-record author-cluster holdouts are skipped on the synthetic corpus.
+- **Task A baselines** — 3 models × 2 horizons × all metrics (AUPRC, bootstrap 95% CI, Precision@1%, Recall@1%, Precision@5%, Recall@5%, ECE, subfield-AUPRC), plus calibration and PR-curve SVGs. On the 36m horizon: metadata_logistic AUPRC=0.92, text hashing 0.81, fusion 0.92.
+- **Task A robustness** — every baseline also runs across 6 valid split manifests (primary + venue / publisher holdouts × 2 horizons), producing `task_a_robustness.json`. This is how generalization-under-distributional-shift gets measured instead of just claimed; skipped holdout columns are reported as `-`.
 - **Task B baseline** — keyword-rules-over-provenance; notice accuracy 1.00, tag macro-F1 0.98, provenance coverage 0.69 on the synthetic set.
 - **Evidence browser site** — landing page with search, governance disclaimer, per-record pages, policy, and change log; non-notice signals are held in `internal_curation_queue.json` off the public site.
 - **Experiment report** — both Markdown and JSON.

@@ -15,7 +15,9 @@ RUNTIME_ROOT="$WORK_ROOT/runtime_root"
 RELEASE_DIR="$WORK_ROOT/release"
 SITE_DIR="$WORK_ROOT/site"
 CANONICAL_SOURCE_DIR="$RUNTIME_ROOT/data/normalized/$SNAPSHOT_ID/canonical"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/common_python_env.sh"
+lsib_require_python_bin "${PYTHON_BIN:-}"
 
 mkdir -p "$WORK_ROOT" "$RUNTIME_ROOT" "$RELEASE_DIR" "$SITE_DIR"
 

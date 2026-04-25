@@ -43,13 +43,13 @@ while :; do
   if [ -f "$ART_ROOT/failed_step.txt" ]; then
     echo "failed_step=$(cat "$ART_ROOT/failed_step.txt")"
   fi
-  if [ -f "$ART_ROOT/COMPLETED" ]; then
-    echo "open_data_finalize_status=COMPLETED"
-    exit 0
-  fi
   if [ -f "$ART_ROOT/FAILED" ]; then
     echo "open_data_finalize_status=FAILED"
     exit 1
+  fi
+  if [ -f "$ART_ROOT/COMPLETED" ]; then
+    echo "open_data_finalize_status=COMPLETED"
+    exit 0
   fi
 
   latest_log=""

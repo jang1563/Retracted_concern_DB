@@ -12,7 +12,7 @@ from .constants import (
     PUBMED_COLLECTOR,
 )
 from .manifest import ManifestStore
-from .utils import parse_date, read_jsonl, write_json, write_jsonl
+from .utils import coerce_bool, parse_date, read_jsonl, write_json, write_jsonl
 
 
 def materialize_canonical_snapshot(
@@ -44,27 +44,21 @@ def materialize_canonical_snapshot(
         "part",
     )
 
-    for path, rows in article_paths:
-        manifest.upsert_artifact(
-            snapshot_id,
-            "canonical_articles",
-            str(path.relative_to(root_dir)),
-            len(rows),
-        )
-    for path, rows in notice_paths:
-        manifest.upsert_artifact(
-            snapshot_id,
-            "canonical_official_notices",
-            str(path.relative_to(root_dir)),
-            len(rows),
-        )
-    for path, rows in orphan_paths:
-        manifest.upsert_artifact(
-            snapshot_id,
-            "canonical_orphan_notices",
-            str(path.relative_to(root_dir)),
-            len(rows),
-        )
+    manifest.replace_artifacts(
+        snapshot_id,
+        "canonical_articles",
+        [(str(path.relative_to(root_dir)), len(rows)) for path, rows in article_paths],
+    )
+    manifest.replace_artifacts(
+        snapshot_id,
+        "canonical_official_notices",
+        [(str(path.relative_to(root_dir)), len(rows)) for path, rows in notice_paths],
+    )
+    manifest.replace_artifacts(
+        snapshot_id,
+        "canonical_orphan_notices",
+        [(str(path.relative_to(root_dir)), len(rows)) for path, rows in orphan_paths],
+    )
 
     summary = _build_collection_summary(
         snapshot_id=snapshot_id,
@@ -77,11 +71,10 @@ def materialize_canonical_snapshot(
     )
     summary_path = canonical_root / "collection_summary.json"
     write_json(summary_path, summary)
-    manifest.upsert_artifact(
+    manifest.replace_artifacts(
         snapshot_id,
         "collection_summary",
-        str(summary_path.relative_to(root_dir)),
-        1,
+        [(str(summary_path.relative_to(root_dir)), 1)],
     )
     return {
         "canonical_root": canonical_root,
@@ -215,7 +208,9 @@ def _join_pubmed_metadata(articles: List[dict], pubmed_rows: List[dict]) -> int:
         if pubmed is None:
             continue
         joined += 1
-        article["is_pubmed_indexed"] = bool(pubmed.get("is_pubmed_indexed", True))
+        article["is_pubmed_indexed"] = coerce_bool(
+            pubmed.get("is_pubmed_indexed"), default=True
+        )
         article["pmid"] = str(pubmed.get("pmid", "") or "")
         article["mesh_terms"] = list(pubmed.get("mesh_terms", []))
         article["keywords"] = list(pubmed.get("keywords", []))
@@ -269,24 +264,46 @@ def _recompute_history_counts(articles: List[dict], notices: List[dict]) -> None
             earliest_event.get(notice["doi"], notice["notice_date"]),
             notice["notice_date"],
         )
+
+    articles_by_doi = {row["doi"]: row for row in articles}
+    event_candidates = []
+    for doi, event_date in earliest_event.items():
+        article = articles_by_doi.get(doi)
+        if article is None:
+            continue
+        publication = parse_date(article["publication_date"])
+        event = parse_date(event_date)
+        event_candidates.append((max(publication, event), doi, article))
+    event_candidates.sort(key=lambda item: (item[0], item[1]))
+
+    active_author_dois = defaultdict(set)
+    active_venue_dois = defaultdict(set)
+    active_publisher_dois = defaultdict(set)
+
+    def activate(article: dict) -> None:
+        doi = article["doi"]
+        for author in article.get("authors", []):
+            active_author_dois[author].add(doi)
+        active_venue_dois[article.get("venue")].add(doi)
+        active_publisher_dois[article.get("publisher")].add(doi)
+
     ordered = sorted(articles, key=lambda row: (row["publication_date"], row["doi"]))
+    event_index = 0
     for row in ordered:
         publication = parse_date(row["publication_date"])
+        while (
+            event_index < len(event_candidates)
+            and event_candidates[event_index][0] < publication
+        ):
+            activate(event_candidates[event_index][2])
+            event_index += 1
+
         prior_author_dois = set()
-        prior_journal_dois = set()
-        for prior in ordered:
-            if prior["doi"] == row["doi"]:
-                continue
-            prior_publication = parse_date(prior["publication_date"])
-            if prior_publication >= publication:
-                break
-            event_date = earliest_event.get(prior["doi"])
-            if not event_date or parse_date(event_date) >= publication:
-                continue
-            if set(prior.get("authors", [])) & set(row.get("authors", [])):
-                prior_author_dois.add(prior["doi"])
-            if prior.get("venue") == row.get("venue") or prior.get("publisher") == row.get("publisher"):
-                prior_journal_dois.add(prior["doi"])
+        for author in row.get("authors", []):
+            prior_author_dois.update(active_author_dois.get(author, ()))
+
+        prior_journal_dois = set(active_venue_dois.get(row.get("venue"), ()))
+        prior_journal_dois.update(active_publisher_dois.get(row.get("publisher"), ()))
         row["author_history_signal_count"] = len(prior_author_dois)
         row["journal_history_signal_count"] = len(prior_journal_dois)
         row["author_history_cutoff_date"] = row["publication_date"]
@@ -300,6 +317,8 @@ def _recompute_history_counts(articles: List[dict], notices: List[dict]) -> None
 
 def _write_shards(directory: Path, rows: List[dict], stem: str) -> List[Tuple[Path, List[dict]]]:
     directory.mkdir(parents=True, exist_ok=True)
+    for stale_path in directory.glob("%s-*.jsonl.gz" % stem):
+        stale_path.unlink()
     outputs = []
     if not rows:
         path = directory / ("%s-00000.jsonl.gz" % stem)
@@ -328,9 +347,11 @@ def _build_collection_summary(
     raw_file_counts = Counter(row["collector_name"] for row in file_rows)
     parsed_row_counts = Counter()
     quarantined_rows = Counter()
+    scope_skipped_rows = Counter()
+    scope_skip_artifacts = Counter()
     for row in file_rows:
         parsed_row_counts[row["collector_name"]] += int(row["parsed_rows"])
-    with manifest._connect() as connection:
+    with manifest._transact() as connection:
         error_rows = connection.execute(
             """
             SELECT files.collector_name, row_errors.error_code, COUNT(*) AS count
@@ -344,6 +365,12 @@ def _build_collection_summary(
         ).fetchall()
     for row in error_rows:
         quarantined_rows["%s:%s" % (row["collector_name"], row["error_code"])] = int(row["count"])
+    for artifact in manifest.list_artifacts(snapshot_id):
+        artifact_kind = artifact["artifact_kind"]
+        if artifact_kind.startswith("scope_skipped_"):
+            collector_name = artifact_kind[len("scope_skipped_") :]
+            scope_skipped_rows[collector_name] += int(artifact["row_count"])
+            scope_skip_artifacts[collector_name] += 1
     missing_abstract = sum(1 for row in articles if not row.get("abstract", "").strip())
     missing_venue = sum(1 for row in articles if row.get("venue") == "Unknown Venue")
     missing_publisher = sum(1 for row in articles if row.get("publisher") == "Unknown Publisher")
@@ -355,6 +382,8 @@ def _build_collection_summary(
         "raw_file_counts_by_collector": dict(raw_file_counts),
         "parsed_row_counts_by_collector": dict(parsed_row_counts),
         "quarantine_counts_by_error_code": dict(quarantined_rows),
+        "scope_skipped_rows_by_collector": dict(scope_skipped_rows),
+        "scope_skip_artifact_count_by_collector": dict(scope_skip_artifacts),
         "duplicate_doi_count": duplicate_doi_count,
         "pubmed_join_count": pubmed_join_count,
         "orphan_notice_count": len(orphan_notices),

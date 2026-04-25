@@ -1,4 +1,4 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
   - name: Dispute a specific record
     url: https://github.com/jang1563/Retracted_concern_DB/blob/main/docs/governance_policy.md

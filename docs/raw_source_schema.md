@@ -124,6 +124,8 @@ PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli validate-vendor-a
 PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli stage-vendor-archive --vendor-root /data/vendor_archive --raw-root /data/raw_snapshot --snapshot-label 2026-03-freeze
 ```
 
+Staging requires OpenAlex, PubMed, and a Retraction Watch dump dated at or before the freeze end. Crossref can be skipped for open-data-only runs with `--allow-missing-crossref`.
+
 ## Design Notes
 
 - Raw files stay local and are not redistributed by the benchmark

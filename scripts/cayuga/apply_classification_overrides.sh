@@ -9,6 +9,11 @@ fi
 CLASSIFICATION_PATH="$1"
 OVERRIDE_PATH="$2"
 OUTPUT_PATH="${3:-$(dirname "$CLASSIFICATION_PATH")/source_classification.merged.tsv}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/common_python_env.sh"
+lsib_require_python_bin "${PYTHON_BIN:-}"
 
 if [ ! -f "$CLASSIFICATION_PATH" ]; then
   echo "classification file does not exist: $CLASSIFICATION_PATH" >&2
@@ -20,7 +25,7 @@ if [ ! -f "$OVERRIDE_PATH" ]; then
   exit 1
 fi
 
-python3 - "$CLASSIFICATION_PATH" "$OVERRIDE_PATH" "$OUTPUT_PATH" <<'PY'
+"$PYTHON_BIN" - "$CLASSIFICATION_PATH" "$OVERRIDE_PATH" "$OUTPUT_PATH" <<'PY'
 import csv
 import sys
 from pathlib import Path

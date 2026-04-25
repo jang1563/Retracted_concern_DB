@@ -60,7 +60,7 @@ def _build_time_manifest(task_name: str, records: List[BenchmarkRecord]) -> Spli
 def _build_group_holdout_manifest(
     base_task_name: str, records: List[BenchmarkRecord], group_field: str
 ) -> Optional[SplitManifest]:
-    holdout_value = _select_holdout_value(records, group_field)
+    holdout_value = _select_holdout_value(records, group_field, base_task_name)
     if holdout_value is None:
         return None
 
@@ -87,23 +87,44 @@ def _build_group_holdout_manifest(
     )
 
 
-def _select_holdout_value(records: List[BenchmarkRecord], group_field: str) -> Optional[str]:
+def _select_holdout_value(
+    records: List[BenchmarkRecord], group_field: str, task_name: str
+) -> Optional[str]:
     for record in sorted(records, key=lambda item: item.publication_date, reverse=True):
         value = getattr(record, group_field)
-        holdout_count = sum(1 for candidate in records if getattr(candidate, group_field) == value)
+        holdout_records = [
+            candidate for candidate in records if getattr(candidate, group_field) == value
+        ]
+        holdout_count = len(holdout_records)
         remaining_count = len(records) - holdout_count
+        if holdout_count < 2 or remaining_count < 3:
+            continue
+        if task_name.startswith("task_a_") and not _has_task_a_label_diversity(
+            holdout_records, task_name
+        ):
+            continue
         if holdout_count >= 1 and remaining_count >= 3:
             return value
     return None
+
+
+def _has_task_a_label_diversity(records: List[BenchmarkRecord], task_name: str) -> bool:
+    label_attr = (
+        "any_signal_or_notice_within_12m"
+        if "12m" in task_name
+        else "any_signal_or_notice_within_36m"
+    )
+    labels = {bool(getattr(record, label_attr)) for record in records}
+    return len(labels) > 1
 
 
 def _partition_years(years: List[int]):
     if len(years) == 0:
         return [], [], []
     if len(years) == 1:
-        return years, years, years
+        return years, [], []
     if len(years) == 2:
-        return [years[0]], [years[0]], [years[1]]
+        return [years[0]], [], [years[1]]
     train_cut = max(1, int(len(years) * 0.6))
     val_cut = max(train_cut + 1, int(len(years) * 0.8))
     if val_cut >= len(years):

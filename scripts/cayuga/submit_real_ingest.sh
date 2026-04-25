@@ -26,8 +26,9 @@ fi
 
 "$(cd "$(dirname "$0")" && pwd)/check_real_snapshot_ready.sh" "$RUN_ROOT"
 
-JOB_ID="$(sbatch "$JOB_DIR/real_ingest_template.sbatch" | awk '{print $NF}')"
 mkdir -p "$ART_ROOT"
+rm -f "$ART_ROOT/COMPLETED" "$ART_ROOT/FAILED" "$ART_ROOT/current_step.txt" "$ART_ROOT/failed_step.txt" "$ART_ROOT/job_id.txt"
+JOB_ID="$(sbatch "$JOB_DIR/real_ingest_template.sbatch" | awk '{print $NF}')"
 printf "%s\n" "$JOB_ID" > "$ART_ROOT/job_id.txt"
 
 echo "real_ingest_job_id=$JOB_ID"

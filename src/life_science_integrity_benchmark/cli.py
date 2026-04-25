@@ -29,6 +29,7 @@ from .dataset import (
     load_source_bundle,
 )
 from .ingest import (
+    build_openalex_scope_allowlist,
     ingest_snapshot,
     normalize_real_source_exports,
     register_snapshot,
@@ -36,7 +37,13 @@ from .ingest import (
 )
 from .manifest import ManifestStore
 from .materialize import materialize_canonical_snapshot
-from .reporting import build_calibration_svg, build_experiment_report
+from .reporting import (
+    build_calibration_svg,
+    build_experiment_report,
+    build_pr_curve_svg,
+    build_results_v0_2_markdown,
+    update_readme_for_v0_2,
+)
 from .site import build_site, export_internal_curation_queue
 from .splits import build_split_manifests
 from .utils import read_json, read_jsonl, write_json
@@ -50,6 +57,140 @@ from .vendor_snapshot import (
 
 
 ROOT = Path.cwd()
+
+
+def _build_ingest_progress_callback():
+    heartbeat_path = os.environ.get("LSIB_STEP_HEARTBEAT_PATH")
+    heartbeat_label = os.environ.get("LSIB_STEP_HEARTBEAT_LABEL", "ingest_snapshot")
+
+    def callback(event: dict):
+        message = _format_ingest_progress_event(event)
+        if message:
+            print(message, flush=True)
+        heartbeat = _format_ingest_heartbeat(event, heartbeat_label)
+        if heartbeat_path and heartbeat:
+            heartbeat_target = Path(heartbeat_path)
+            heartbeat_target.parent.mkdir(parents=True, exist_ok=True)
+            heartbeat_target.write_text(heartbeat + "\n", encoding="utf-8")
+
+    return callback
+
+
+def _ingest_progress_every_seconds() -> float:
+    raw_value = os.environ.get("LSIB_INGEST_PROGRESS_EVERY_SECONDS", "30")
+    try:
+        return float(raw_value)
+    except ValueError:
+        return 30.0
+
+
+def _format_ingest_progress_event(event: dict) -> str:
+    event_name = event.get("event")
+    collector = event.get("collector", "unknown")
+    file_index = event.get("file_index")
+    total_files = event.get("total_files")
+    relative_path = event.get("relative_path")
+    file_pos = "%s/%s" % (file_index, total_files) if file_index and total_files else "n/a"
+    if event_name == "start":
+        return "ingest_progress: event=start collector=%s total_files=%s" % (
+            collector,
+            event.get("total_files", 0),
+        )
+    if event_name == "file_started":
+        return "ingest_progress: event=file_started collector=%s file=%s path=%s" % (
+            collector,
+            file_pos,
+            relative_path,
+        )
+    if event_name == "file_progress":
+        return (
+            "ingest_progress: event=file_progress collector=%s file=%s raw_records=%s "
+            "normalized_rows=%s quarantined_rows=%s scope_skipped_rows=%s path=%s"
+        ) % (
+            collector,
+            file_pos,
+            event.get("raw_records_seen", 0),
+            event.get("normalized_rows", 0),
+            event.get("quarantined_rows", 0),
+            event.get("scope_skipped_rows", 0),
+            relative_path,
+        )
+    if event_name == "file_skipped":
+        return "ingest_progress: event=file_skipped collector=%s file=%s path=%s" % (
+            collector,
+            file_pos,
+            relative_path,
+        )
+    if event_name == "file_completed":
+        return (
+            "ingest_progress: event=file_completed collector=%s file=%s raw_records=%s "
+            "normalized_rows=%s quarantined_rows=%s scope_skipped_rows=%s path=%s"
+        ) % (
+            collector,
+            file_pos,
+            event.get("raw_records_seen", 0),
+            event.get("normalized_rows", 0),
+            event.get("quarantined_rows", 0),
+            event.get("scope_skipped_rows", 0),
+            relative_path,
+        )
+    if event_name == "finished":
+        return (
+            "ingest_progress: event=finished collector=%s total_files=%s processed_files=%s "
+            "skipped_files=%s normalized_rows=%s quarantined_rows=%s scope_skipped_rows=%s"
+        ) % (
+            collector,
+            event.get("total_files", 0),
+            event.get("processed_files", 0),
+            event.get("skipped_files", 0),
+            event.get("total_normalized_rows", 0),
+            event.get("total_quarantined_rows", 0),
+            event.get("total_scope_skipped_rows", 0),
+        )
+    if event_name == "failed":
+        return "ingest_progress: event=failed collector=%s processed_files=%s skipped_files=%s" % (
+            collector,
+            event.get("processed_files", 0),
+            event.get("skipped_files", 0),
+        )
+    return ""
+
+
+def _format_ingest_heartbeat(event: dict, heartbeat_label: str) -> str:
+    event_name = event.get("event")
+    if event_name == "start":
+        return "%s 0/%s started" % (heartbeat_label, event.get("total_files", 0))
+    if event_name in {"file_started", "file_progress", "file_completed", "file_skipped"}:
+        return (
+            "%s %s/%s raw_records=%s normalized_rows=%s quarantined_rows=%s scope_skipped_rows=%s path=%s"
+        ) % (
+            heartbeat_label,
+            event.get("file_index", 0),
+            event.get("total_files", 0),
+            event.get("raw_records_seen", 0),
+            event.get("normalized_rows", 0),
+            event.get("quarantined_rows", 0),
+            event.get("scope_skipped_rows", 0),
+            event.get("relative_path", ""),
+        )
+    if event_name == "finished":
+        return (
+            "%s completed processed=%s skipped=%s normalized_rows=%s quarantined_rows=%s scope_skipped_rows=%s"
+        ) % (
+            heartbeat_label,
+            event.get("processed_files", 0),
+            event.get("skipped_files", 0),
+            event.get("total_normalized_rows", 0),
+            event.get("total_quarantined_rows", 0),
+            event.get("total_scope_skipped_rows", 0),
+        )
+    if event_name == "failed":
+        return "%s failed processed=%s skipped=%s" % (
+            heartbeat_label,
+            event.get("processed_files", 0),
+            event.get("skipped_files", 0),
+        )
+    return ""
 
 
 def main(argv=None):
@@ -78,6 +219,10 @@ def main(argv=None):
     ingest = subparsers.add_parser("ingest-snapshot")
     ingest.add_argument("--snapshot-id", required=True)
     ingest.add_argument("--collector", required=True)
+
+    allowlist = subparsers.add_parser("build-openalex-scope-allowlist")
+    allowlist.add_argument("--snapshot-id", required=True)
+    allowlist.add_argument("--output-path", required=True)
 
     materialize = subparsers.add_parser("materialize-canonical")
     materialize.add_argument("--snapshot-id", required=True)
@@ -125,6 +270,17 @@ def main(argv=None):
 
     subparsers.add_parser("build-site")
     subparsers.add_parser("build-report")
+    results_v02 = subparsers.add_parser("build-results-v0-2")
+    results_v02.add_argument(
+        "--run-root",
+        default="/athena/masonlab/scratch/users/jak4013/lsib/20260410-overnight-rerun1",
+    )
+    results_v02.add_argument("--snapshot-label", default="2026-03-freeze")
+    results_v02.add_argument("--snapshot-id", default="public_open_data_2026_03_freeze")
+    results_v02.add_argument("--output-path")
+    readme_v02 = subparsers.add_parser("build-readme-v0-2")
+    readme_v02.add_argument("--output-path")
+    readme_v02.add_argument("--results-doc-path", default="docs/results_v0.2.md")
     subparsers.add_parser("demo")
 
     args = parser.parse_args(argv)
@@ -165,10 +321,25 @@ def main(argv=None):
             snapshot_id=args.snapshot_id,
             collector_name=args.collector,
             root_dir=root_dir,
+            progress_callback=_build_ingest_progress_callback(),
+            progress_every_seconds=_ingest_progress_every_seconds(),
         )
         print("snapshot_id:", result["snapshot_id"])
         print("collector:", result["collector"])
+        print("total_files:", result["total_files"])
         print("processed_files:", result["processed_files"])
+        print("skipped_files:", result["skipped_files"])
+        return
+
+    if args.command == "build-openalex-scope-allowlist":
+        result = build_openalex_scope_allowlist(
+            snapshot_id=args.snapshot_id,
+            output_path=Path(args.output_path),
+            root_dir=root_dir,
+        )
+        print("snapshot_id:", result["snapshot_id"])
+        print("output_path:", result["output_path"])
+        print("doi_count:", result["doi_count"])
         return
 
     if args.command == "materialize-canonical":
@@ -262,6 +433,30 @@ def main(argv=None):
         _build_report(release_dir)
         return
 
+    if args.command == "build-results-v0-2":
+        output_path = (
+            Path(args.output_path)
+            if args.output_path
+            else root_dir / "docs" / "results_v0.2.md"
+        )
+        _build_results_v0_2_doc(
+            release_dir=release_dir,
+            output_path=output_path,
+            run_root=args.run_root,
+            snapshot_label=args.snapshot_label,
+            snapshot_id=args.snapshot_id,
+        )
+        return
+
+    if args.command == "build-readme-v0-2":
+        output_path = Path(args.output_path) if args.output_path else root_dir / "README.md"
+        _build_readme_v0_2_doc(
+            release_dir=release_dir,
+            output_path=output_path,
+            results_doc_path=args.results_doc_path,
+        )
+        return
+
     if args.command == "build-core":
         _build_core(source_dir, release_dir, snapshot_date)
         return
@@ -296,8 +491,11 @@ def _build_core(source_dir: Path, release_dir: Path, snapshot_date: str):
     records = build_benchmark_records(articles, notices, signals, snapshot_date=snapshot_date)
     paths = export_release_bundle(records, release_dir)
     collection_summary_path = source_dir / "collection_summary.json"
+    release_collection_summary_path = release_dir / "collection_summary.json"
     if collection_summary_path.exists():
-        write_json(release_dir / "collection_summary.json", read_json(collection_summary_path))
+        write_json(release_collection_summary_path, read_json(collection_summary_path))
+    else:
+        release_collection_summary_path.unlink(missing_ok=True)
     print("benchmark_jsonl:", paths["jsonl"])
     print("benchmark_csv:", paths["csv"])
     print("summary:", paths["summary"])
@@ -349,6 +547,10 @@ def _train_task_a(records, manifests, release_dir: Path, text_backend: str):
     svg_path = release_dir / "task_a_calibration_curves.svg"
     svg_path.write_text(build_calibration_svg(outputs), encoding="utf-8")
     print("task_a_calibration_curves:", svg_path)
+
+    pr_svg_path = release_dir / "task_a_pr_curves.svg"
+    pr_svg_path.write_text(build_pr_curve_svg(outputs), encoding="utf-8")
+    print("task_a_pr_curves:", pr_svg_path)
 
     return outputs
 
@@ -411,6 +613,50 @@ def _build_report(release_dir: Path):
     for name, path in report_paths.items():
         print("%s: %s" % (name, path))
     return report_paths
+
+
+def _build_results_v0_2_doc(
+    release_dir: Path,
+    output_path: Path,
+    run_root: str,
+    snapshot_label: str,
+    snapshot_id: str,
+):
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    robustness_path = release_dir / "task_a_robustness.json"
+    markdown = build_results_v0_2_markdown(
+        summary=read_json(release_dir / "summary.json"),
+        leakage_report=read_json(release_dir / "leakage_report.json"),
+        task_a_baselines=read_json(release_dir / "task_a_baselines.json"),
+        task_a_robustness=read_json(robustness_path) if robustness_path.exists() else {},
+        task_b_baseline=read_json(release_dir / "task_b_baseline.json"),
+        run_root=run_root,
+        snapshot_label=snapshot_label,
+        snapshot_id=snapshot_id,
+    )
+    output_path.write_text(markdown, encoding="utf-8")
+    print("results_v0_2:", output_path)
+    return output_path
+
+
+def _build_readme_v0_2_doc(
+    release_dir: Path,
+    output_path: Path,
+    results_doc_path: str,
+):
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    readme_text = output_path.read_text(encoding="utf-8")
+    updated = update_readme_for_v0_2(
+        readme_text=readme_text,
+        summary=read_json(release_dir / "summary.json"),
+        leakage_report=read_json(release_dir / "leakage_report.json"),
+        task_a_baselines=read_json(release_dir / "task_a_baselines.json"),
+        task_b_baseline=read_json(release_dir / "task_b_baseline.json"),
+        results_doc_path=results_doc_path,
+    )
+    output_path.write_text(updated, encoding="utf-8")
+    print("readme_v0_2:", output_path)
+    return output_path
 
 
 if __name__ == "__main__":

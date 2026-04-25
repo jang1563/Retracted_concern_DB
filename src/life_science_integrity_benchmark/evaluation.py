@@ -1,9 +1,11 @@
 """Metrics for ranking, calibration, and multilabel evaluation."""
 
-from typing import Dict, Iterable, List, Sequence, Tuple
+import random
+from typing import Callable, Dict, List, Sequence, Tuple
 
 
 def average_precision(labels: Sequence[int], scores: Sequence[float]) -> float:
+    _validate_aligned_lengths(labels, scores)
     paired = sorted(zip(scores, labels), key=lambda item: item[0], reverse=True)
     positives = sum(labels)
     if positives == 0:
@@ -18,6 +20,7 @@ def average_precision(labels: Sequence[int], scores: Sequence[float]) -> float:
 
 
 def recall_at_k(labels: Sequence[int], scores: Sequence[float], k: int) -> float:
+    _validate_aligned_lengths(labels, scores)
     paired = sorted(zip(scores, labels), key=lambda item: item[0], reverse=True)[:k]
     positives = sum(labels)
     if positives == 0:
@@ -25,7 +28,56 @@ def recall_at_k(labels: Sequence[int], scores: Sequence[float], k: int) -> float
     return sum(label for _, label in paired) / positives
 
 
+def precision_at_k(labels: Sequence[int], scores: Sequence[float], k: int) -> float:
+    _validate_aligned_lengths(labels, scores)
+    if k <= 0:
+        return 0.0
+    paired = sorted(zip(scores, labels), key=lambda item: item[0], reverse=True)[:k]
+    if not paired:
+        return 0.0
+    return sum(label for _, label in paired) / len(paired)
+
+
+def bootstrap_ci(
+    labels: Sequence[int],
+    probs: Sequence[float],
+    metric_fn: Callable[[Sequence[int], Sequence[float]], float],
+    n_bootstrap: int = 1000,
+    alpha: float = 0.05,
+) -> Tuple[float, float]:
+    """Estimate a percentile bootstrap confidence interval for a ranking metric.
+
+    A fixed RNG seed keeps the benchmark outputs reproducible across runs and
+    test environments.
+    """
+    if len(labels) != len(probs):
+        raise ValueError("labels and probs must have the same length")
+    if not labels or not probs:
+        return 0.0, 0.0
+
+    if n_bootstrap <= 0:
+        point_estimate = metric_fn(labels, probs)
+        return point_estimate, point_estimate
+
+    rng = random.Random(0)
+    sample_size = len(labels)
+    draws = []
+    for _ in range(n_bootstrap):
+        indices = [rng.randrange(sample_size) for _ in range(sample_size)]
+        sampled_labels = [labels[index] for index in indices]
+        sampled_probs = [probs[index] for index in indices]
+        draws.append(metric_fn(sampled_labels, sampled_probs))
+
+    draws.sort()
+    lower_index = max(0, min(len(draws) - 1, int((alpha / 2) * len(draws))))
+    upper_index = max(0, min(len(draws) - 1, int((1 - (alpha / 2)) * len(draws)) - 1))
+    return draws[lower_index], draws[upper_index]
+
+
 def expected_calibration_error(labels: Sequence[int], probs: Sequence[float], bins: int = 10) -> float:
+    _validate_aligned_lengths(labels, probs)
+    if bins <= 0:
+        raise ValueError("bins must be positive")
     bucket_totals = [0] * bins
     bucket_labels = [0.0] * bins
     bucket_probs = [0.0] * bins
@@ -46,6 +98,7 @@ def expected_calibration_error(labels: Sequence[int], probs: Sequence[float], bi
 
 
 def accuracy(labels: Sequence[str], preds: Sequence[str]) -> float:
+    _validate_aligned_lengths(labels, preds)
     if not labels:
         return 0.0
     matches = sum(1 for left, right in zip(labels, preds) if left == right)
@@ -53,6 +106,7 @@ def accuracy(labels: Sequence[str], preds: Sequence[str]) -> float:
 
 
 def macro_f1(label_rows: Sequence[Sequence[str]], pred_rows: Sequence[Sequence[str]], universe: Sequence[str]) -> float:
+    _validate_aligned_lengths(label_rows, pred_rows)
     per_tag = []
     for tag in universe:
         tp = fp = fn = 0
@@ -90,6 +144,9 @@ def calibration_curve_data(
     bins are omitted so callers can detect degenerate cases (e.g. all
     predictions in one bin).
     """
+    _validate_aligned_lengths(labels, probs)
+    if n_bins <= 0:
+        raise ValueError("n_bins must be positive")
     bins = []
     for i in range(n_bins):
         lo = i / n_bins
@@ -121,3 +178,8 @@ def grouped_slice_counts(records) -> Dict[str, Dict[str, int]]:
         output["subfield"][record.subfield] = output["subfield"].get(record.subfield, 0) + 1
         output["publisher"][record.publisher] = output["publisher"].get(record.publisher, 0) + 1
     return output
+
+
+def _validate_aligned_lengths(left: Sequence, right: Sequence) -> None:
+    if len(left) != len(right):
+        raise ValueError("metric inputs must have the same length")

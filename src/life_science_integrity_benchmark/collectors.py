@@ -2,10 +2,11 @@
 
 import csv
 import json
+import os
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Set, Tuple
 
 from .constants import (
     ALLOWED_NOTICE_TYPES,
@@ -16,6 +17,7 @@ from .constants import (
 from .manifest import ManifestStore
 from .utils import (
     coerce_date_with_precision,
+    coerce_bool,
     discover_files,
     first_nonempty,
     normalize_doi,
@@ -33,6 +35,38 @@ OPENALEX_WORK_TYPE_MAP = {
     "review_article": "review",
     "review-article": "review",
 }
+
+OPENALEX_LIFE_SCIENCE_SCORED_TERMS = (
+    "biology",
+    "medicine",
+    "biochemistry",
+    "genetics",
+    "bioinformatics",
+    "ecology",
+    "botany",
+    "zoology",
+    "microbiology",
+    "neuroscience",
+    "immunology",
+    "pharmacology",
+    "epidemiology",
+)
+OPENALEX_LIFE_SCIENCE_PRIMARY_TERMS = (
+    "medicine",
+    "medical",
+    "clinical",
+    "biochemistry",
+    "genetics",
+    "bioinformatics",
+    "ecology",
+    "botany",
+    "zoology",
+    "microbiology",
+    "neuroscience",
+    "immunology",
+    "pharmacology",
+    "epidemiology",
+)
 
 
 @dataclass
@@ -86,6 +120,14 @@ class OpenAlexBulkCollector(BaseCollector):
     relative_root = "openalex"
     supported_suffixes = (".jsonl", ".jsonl.gz", ".gz")
 
+    def __init__(self):
+        self.early_scope_filter = coerce_bool(
+            os.environ.get("LSIB_OPENALEX_EARLY_SCOPE_FILTER"), default=False
+        )
+        self.scope_doi_allowlist = _load_doi_allowlist(
+            os.environ.get("LSIB_OPENALEX_SCOPE_DOI_ALLOWLIST")
+        )
+
     def iter_raw_records(self, file_meta: FileMeta) -> Iterator[Tuple[int, object]]:
         with open_text(file_meta.absolute_path, "rt") as handle:
             for line_number, line in enumerate(handle, start=1):
@@ -119,6 +161,11 @@ class OpenAlexBulkCollector(BaseCollector):
         ).strip().lower().replace(" ", "_")
         work_type = OPENALEX_WORK_TYPE_MAP.get(raw_work_type, raw_work_type)
         if work_type not in {"article", "review"}:
+            if self.early_scope_filter:
+                return _scope_skip(
+                    line_number=context["line_number"],
+                    reason="unsupported_work_type",
+                )
             return _quarantine(
                 line_number=context["line_number"],
                 error_code="unsupported_work_type",
@@ -178,6 +225,35 @@ class OpenAlexBulkCollector(BaseCollector):
             )
             or ""
         )
+        try:
+            references_count = int(
+                first_nonempty(
+                    row.get("referenced_works_count"),
+                    row.get("references_count"),
+                    row.get("cited_by_count"),
+                    0,
+                )
+            )
+            openalex_life_science_score = _extract_life_science_score(row)
+        except (TypeError, ValueError) as exc:
+            return _quarantine(
+                line_number=context["line_number"],
+                error_code="bad_numeric",
+                error_message=str(exc),
+                raw_record=row,
+            )
+
+        scope_skip_reason = self._early_scope_skip_reason(
+            doi=doi,
+            publication_date=publication_date,
+            work_type=work_type,
+            life_science_score=openalex_life_science_score,
+        )
+        if scope_skip_reason:
+            return _scope_skip(
+                line_number=context["line_number"],
+                reason=scope_skip_reason,
+            )
 
         return {
             "kind": "normalized",
@@ -192,17 +268,10 @@ class OpenAlexBulkCollector(BaseCollector):
                 "work_type": work_type,
                 "subfield": _infer_openalex_subfield(title, abstract, row),
                 "is_pubmed_indexed": False,
-                "openalex_life_science_score": _extract_life_science_score(row),
+                "openalex_life_science_score": openalex_life_science_score,
                 "authors": authors,
                 "institutions": institutions,
-                "references_count": int(
-                    first_nonempty(
-                        row.get("referenced_works_count"),
-                        row.get("references_count"),
-                        row.get("cited_by_count"),
-                        0,
-                    )
-                ),
+                "references_count": references_count,
                 "author_history_signal_count": 0,
                 "journal_history_signal_count": 0,
                 "oa_status": _normalize_oa_status(row),
@@ -226,6 +295,28 @@ class OpenAlexBulkCollector(BaseCollector):
                 "task_a_date_bucket": _date_bucket(publication_date_precision),
             },
         }
+
+    def _early_scope_skip_reason(
+        self,
+        doi: str,
+        publication_date: str,
+        work_type: str,
+        life_science_score: float,
+    ) -> str:
+        if not self.early_scope_filter:
+            return ""
+        year = int(publication_date[:4])
+        if year < 2000:
+            return "publication_year_before_2000"
+        if year > 2024:
+            return "publication_year_after_2024"
+        if work_type not in {"article", "review"}:
+            return "unsupported_work_type"
+        if doi in self.scope_doi_allowlist:
+            return ""
+        if life_science_score < 0.70:
+            return "life_science_score_below_0_70"
+        return ""
 
 
 class LocalNoticeExportCollector(BaseCollector):
@@ -364,9 +455,7 @@ class PubMedIndexCollector(BaseCollector):
             "row": {
                 "doi": doi,
                 "pmid": str(first_nonempty(row.get("pmid"), row.get("pubmed_id"), "")),
-                "is_pubmed_indexed": bool(
-                    first_nonempty(row.get("is_pubmed_indexed"), True)
-                ),
+                "is_pubmed_indexed": coerce_bool(row.get("is_pubmed_indexed"), default=True),
                 "mesh_terms": mesh_terms,
                 "keywords": keywords,
                 "pubmed_publication_types": publication_types,
@@ -420,6 +509,29 @@ def _quarantine(line_number: int, error_code: str, error_message: str, raw_recor
             "error_message": error_message,
             "raw_excerpt": _raw_excerpt(raw_record),
         },
+    }
+
+
+def _scope_skip(line_number: int, reason: str) -> dict:
+    return {
+        "kind": "scope_skip",
+        "row": {
+            "line_number": line_number,
+            "reason": reason,
+        },
+    }
+
+
+def _load_doi_allowlist(path_value: Optional[str]) -> Set[str]:
+    if not path_value:
+        return set()
+    path = Path(path_value)
+    if not path.exists():
+        return set()
+    return {
+        doi
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if (doi := normalize_doi(line))
     }
 
 
@@ -521,24 +633,16 @@ def _extract_life_science_score(row: dict) -> float:
         if not isinstance(concept, dict):
             continue
         name = (concept.get("display_name") or "").lower()
-        if any(
-            token in name
-            for token in ("biology", "medicine", "biochemistry", "genetics", "bioinformatics")
-        ):
+        if _matches_any([name], OPENALEX_LIFE_SCIENCE_SCORED_TERMS):
             best = max(best, float(concept.get("score", 0.0)))
 
     primary_topic = row.get("primary_topic") or {}
-    topic_names = [
+    primary_topic_names = [
         ((primary_topic.get("subfield") or {}).get("display_name") or "").lower(),
         ((primary_topic.get("field") or {}).get("display_name") or "").lower(),
-        ((primary_topic.get("domain") or {}).get("display_name") or "").lower(),
     ]
-    if any(
-        token in name
-        for name in topic_names
-        for token in ("biology", "medicine", "genetics", "bioinformatics", "life sciences", "health sciences")
-    ):
-        best = max(best, 0.95)
+    if _matches_any(primary_topic_names, OPENALEX_LIFE_SCIENCE_PRIMARY_TERMS):
+        best = max(best, 0.90)
 
     for topic in row.get("topics", []) or []:
         if not isinstance(topic, dict):
@@ -548,13 +652,18 @@ def _extract_life_science_score(row: dict) -> float:
             ((topic.get("subfield") or {}).get("display_name") or "").lower(),
             ((topic.get("field") or {}).get("display_name") or "").lower(),
         ]
-        if any(
-            token in name
-            for name in names
-            for token in ("biology", "medicine", "genetics", "bioinformatics")
-        ):
-            best = max(best, float(topic.get("score", 0.90)))
+        if _matches_any(names, OPENALEX_LIFE_SCIENCE_SCORED_TERMS):
+            score = topic.get("score")
+            if score is None:
+                if _matches_any(names, OPENALEX_LIFE_SCIENCE_PRIMARY_TERMS):
+                    best = max(best, 0.90)
+            else:
+                best = max(best, float(score))
     return round(best, 4)
+
+
+def _matches_any(names: List[str], terms: Tuple[str, ...]) -> bool:
+    return any(token in name for name in names for token in terms)
 
 
 def _infer_openalex_subfield(title: str, abstract: str, row: dict) -> str:

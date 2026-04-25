@@ -124,11 +124,15 @@ class LogisticRegressionModel:
         self.bias = 0.0
 
     def fit(self, features: List[List[float]], labels: Sequence[int]) -> None:
+        if len(features) != len(labels):
+            raise ValueError("features and labels must have the same length")
         if not features:
             self.weights = []
             self.bias = 0.0
             return
         width = len(features[0])
+        if any(len(vector) != width for vector in features):
+            raise ValueError("all feature vectors must have the same width")
         self.weights = [0.0] * width
         self.bias = 0.0
         for _ in range(self.epochs):
@@ -147,6 +151,8 @@ class LogisticRegressionModel:
             self.bias -= self.learning_rate * grad_b * scale
 
     def predict_proba(self, features: List[List[float]]) -> List[float]:
+        if any(len(vector) != len(self.weights) for vector in features):
+            raise ValueError("feature width must match fitted model width")
         return [sigmoid(dot(self.weights, vector) + self.bias) for vector in features]
 
 
@@ -190,4 +196,6 @@ class OptionalTransformerEncoder:
 
 
 def concat_features(left: List[List[float]], right: List[List[float]]) -> List[List[float]]:
+    if len(left) != len(right):
+        raise ValueError("feature matrices must have the same number of rows")
     return [a + b for a, b in zip(left, right)]

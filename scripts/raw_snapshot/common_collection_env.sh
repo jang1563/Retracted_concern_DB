@@ -3,6 +3,10 @@
 # Shared runtime bootstrap for raw-snapshot collection scripts.
 # It keeps collection wrappers compatible with local shells and Cayuga module-based setups.
 
+COMMON_PYTHON_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/common_python_env.sh"
+# shellcheck disable=SC1090
+source "$COMMON_PYTHON_ENV"
+
 if [ -n "${RAW_SNAPSHOT_ENV_FILE:-}" ] && [ -f "${RAW_SNAPSHOT_ENV_FILE}" ]; then
   # shellcheck disable=SC1090
   source "${RAW_SNAPSHOT_ENV_FILE}"
@@ -27,19 +31,7 @@ if ! command -v module >/dev/null 2>&1; then
   done
 fi
 
-if [ -z "${PYTHON_BIN:-}" ]; then
-  for python_candidate in \
-    "${HOME}/miniconda3/miniconda3/bin/python" \
-    "${HOME}/miniconda3/bin/python" \
-    "${HOME}/miniforge3/bin/python" \
-    "${HOME}/mambaforge/bin/python"
-  do
-    if [ -x "$python_candidate" ]; then
-      export PYTHON_BIN="$python_candidate"
-      break
-    fi
-  done
-fi
+lsib_resolve_python_bin "${PYTHON_BIN:-}" >/dev/null 2>&1 || true
 
 if command -v module >/dev/null 2>&1; then
   if [ -n "${RAW_SNAPSHOT_EXTRA_MODULES:-}" ]; then

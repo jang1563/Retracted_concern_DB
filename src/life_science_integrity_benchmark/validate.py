@@ -14,6 +14,7 @@ def validate_snapshot(snapshot_id: str, root_dir: Path, manifest: ManifestStore)
     canonical_root = normalized_root / "canonical"
     article_rows = _read_shard_rows(canonical_root / "articles")
     notice_rows = _read_shard_rows(canonical_root / "official_notices")
+    orphan_notice_rows = _read_shard_rows(canonical_root / "orphan_notices")
     summary = read_json(canonical_root / "collection_summary.json")
     snapshot = manifest.get_snapshot(snapshot_id)
     snapshot_date = parse_date(snapshot["snapshot_date"])
@@ -34,11 +35,32 @@ def validate_snapshot(snapshot_id: str, root_dir: Path, manifest: ManifestStore)
             violations.append("event date later than snapshot: %s" % notice["doi"])
 
     for row in article_rows:
+        if parse_date(row["publication_date"]) > snapshot_date:
+            violations.append("article publication date later than snapshot: %s" % row["doi"])
         if (
             row.get("task_a_date_bucket") == "primary"
             and row.get("publication_date_precision") == "year_imputed"
         ):
             violations.append("primary Task A row has year-imputed date: %s" % row["doi"])
+
+    _validate_summary_count(
+        summary,
+        "canonical_article_count",
+        len(article_rows),
+        violations,
+    )
+    _validate_summary_count(
+        summary,
+        "canonical_notice_count",
+        len(notice_rows),
+        violations,
+    )
+    _validate_summary_count(
+        summary,
+        "orphan_notice_count",
+        len(orphan_notice_rows),
+        violations,
+    )
 
     file_rows = manifest.list_files(snapshot_id)
     for file_row in file_rows:
@@ -74,7 +96,7 @@ def validate_snapshot(snapshot_id: str, root_dir: Path, manifest: ManifestStore)
         "snapshot_date": snapshot["snapshot_date"],
         "article_count": len(article_rows),
         "notice_count": len(notice_rows),
-        "orphan_notice_count": summary.get("orphan_notice_count", 0),
+        "orphan_notice_count": len(orphan_notice_rows),
         "passed": not violations,
         "violations": violations,
     }
@@ -87,3 +109,21 @@ def _read_shard_rows(directory: Path) -> List[dict]:
     for path in sorted(directory.glob("*.jsonl.gz")):
         rows.extend(read_jsonl(path))
     return rows
+
+
+def _validate_summary_count(
+    summary: dict, field_name: str, actual_count: int, violations: List[str]
+) -> None:
+    if field_name not in summary:
+        violations.append("collection summary missing %s" % field_name)
+        return
+    try:
+        expected_count = int(summary[field_name])
+    except (TypeError, ValueError):
+        violations.append("collection summary invalid %s: %r" % (field_name, summary[field_name]))
+        return
+    if expected_count != actual_count:
+        violations.append(
+            "collection summary %s mismatch: summary=%d actual=%d"
+            % (field_name, expected_count, actual_count)
+        )

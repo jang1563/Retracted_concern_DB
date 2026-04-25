@@ -6,9 +6,11 @@ from typing import Dict, List, Sequence, Tuple
 from .evaluation import (
     accuracy,
     average_precision,
+    bootstrap_ci,
     calibration_curve_data,
     expected_calibration_error,
     macro_f1,
+    precision_at_k,
     provenance_coverage,
     recall_at_k,
 )
@@ -155,13 +157,13 @@ def run_task_a_robustness(
     transformer_model_name: str = "allenai/scibert_scivocab_uncased",
 ) -> Dict[str, List[BaselineRun]]:
     """Run Task A baselines across the primary time split AND every grouped
-    holdout manifest (author cluster, venue, publisher), for both horizons.
+    holdout manifest that split construction deemed usable, for both horizons.
 
     Returns a mapping from manifest name (e.g. ``task_a_12m`` or
     ``task_a_36m_venue_holdout``) to the list of baseline runs produced on
-    that split. This is how robustness to distributional shift across
-    authorship clusters, venues, and publishers gets measured empirically
-    rather than just claimed in the README.
+    that split. This is how robustness to distributional shift across valid
+    authorship-cluster, venue, and publisher holdouts gets measured
+    empirically rather than just claimed in the README.
     """
     runs_by_split: Dict[str, List[BaselineRun]] = {}
     for manifest_name in sorted(manifests):
@@ -291,16 +293,32 @@ def _predict_notice_status(tags: List[str]) -> str:
 
 def _ranking_metrics(
     labels: Sequence[int], probs: Sequence[float], records: List[BenchmarkRecord]
-) -> Dict[str, float]:
+) -> Dict[str, object]:
     record_count = max(1, len(records))
     top_1pct = max(1, int(round(record_count * 0.01)))
     top_5pct = max(1, int(round(record_count * 0.05)))
+    auprc = average_precision(labels, probs)
+    auprc_ci_lower, auprc_ci_upper = bootstrap_ci(labels, probs, average_precision)
+    threshold_scan = {}
+    for threshold_pct in (0.5, 1, 2, 5, 10):
+        threshold_key = "top_%spct" % ("%g" % threshold_pct)
+        top_k = max(1, int(round(record_count * (threshold_pct / 100.0))))
+        threshold_scan[threshold_key] = {
+            "k": min(top_k, len(probs)),
+            "precision": round(precision_at_k(labels, probs, top_k), 4),
+            "recall": round(recall_at_k(labels, probs, top_k), 4),
+        }
     metrics = {
-        "AUPRC": round(average_precision(labels, probs), 4),
+        "AUPRC": round(auprc, 4),
+        "AUPRC_ci_lower": round(auprc_ci_lower, 4),
+        "AUPRC_ci_upper": round(auprc_ci_upper, 4),
+        "Precision@1pct": round(precision_at_k(labels, probs, top_1pct), 4),
+        "Precision@5pct": round(precision_at_k(labels, probs, top_5pct), 4),
         "Recall@1pct": round(recall_at_k(labels, probs, top_1pct), 4),
         "Recall@5pct": round(recall_at_k(labels, probs, top_5pct), 4),
         "ECE": round(expected_calibration_error(labels, probs), 4),
         "calibration_curve": calibration_curve_data(labels, probs),
+        "precision_recall_at_thresholds": threshold_scan,
     }
     subfield_breakdown = {}
     for subfield in sorted({record.subfield for record in records}):

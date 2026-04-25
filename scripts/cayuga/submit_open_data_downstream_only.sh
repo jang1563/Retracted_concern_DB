@@ -42,11 +42,13 @@ chmod +x "$JOB_PATH"
 
 if [ -z "$DEPENDENCY_SPEC" ]; then
   "$SCRIPT_DIR/check_local_raw_snapshot.sh" "$RUN_ROOT/raw/public_open_data_snapshot"
+  rm -f "$ART_ROOT/COMPLETED" "$ART_ROOT/FAILED" "$ART_ROOT/current_step.txt" "$ART_ROOT/failed_step.txt" "$ART_ROOT/job_id.txt"
   JOB_ID="$(sbatch "$JOB_PATH" | awk '{print $NF}')"
 else
   if [[ "$DEPENDENCY_SPEC" != *:* ]]; then
     DEPENDENCY_SPEC="afterok:$DEPENDENCY_SPEC"
   fi
+  rm -f "$ART_ROOT/COMPLETED" "$ART_ROOT/FAILED" "$ART_ROOT/current_step.txt" "$ART_ROOT/failed_step.txt" "$ART_ROOT/job_id.txt"
   JOB_ID="$(sbatch --dependency="$DEPENDENCY_SPEC" "$JOB_PATH" | awk '{print $NF}')"
 fi
 

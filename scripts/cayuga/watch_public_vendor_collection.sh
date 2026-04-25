@@ -47,13 +47,13 @@ while :; do
     echo "summary_file=$ART_ROOT/summary.txt"
     sed -n '1,40p' "$ART_ROOT/summary.txt" || true
   fi
-  if [ -f "$ART_ROOT/COMPLETED" ]; then
-    echo "public_vendor_collection_status=COMPLETED"
-    exit 0
-  fi
   if [ -f "$ART_ROOT/FAILED" ]; then
     echo "public_vendor_collection_status=FAILED"
     exit 1
+  fi
+  if [ -f "$ART_ROOT/COMPLETED" ]; then
+    echo "public_vendor_collection_status=COMPLETED"
+    exit 0
   fi
 
   latest_log=""

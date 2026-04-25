@@ -10,7 +10,8 @@ set -euo pipefail
 RUN_ROOT="__RUN_ROOT__"
 ART_RELEASE="$RUN_ROOT/artifacts/open_data_release"
 ART_SITE="$RUN_ROOT/artifacts/open_data_site"
-RUNTIME_ROOT="$RUN_ROOT/artifacts/open_data_runtime"
+LOCAL_RUNTIME_BASE="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}"
+RUNTIME_ROOT="$LOCAL_RUNTIME_BASE/lsib_open_data_runtime_${SLURM_JOB_ID:-$$}"
 RAW_ROOT="$RUN_ROOT/raw/public_open_data_snapshot"
 PUBLIC_ART_ROOT="$RUN_ROOT/artifacts/public_vendor_collection"
 REPO_ROOT="$RUN_ROOT/repo"
@@ -31,6 +32,7 @@ PYTHON_BIN="$(command -v python3 || command -v python)"
 
 cd "$REPO_ROOT"
 export PYTHONPATH=src
+echo "runtime_root=$RUNTIME_ROOT"
 
 if [ ! -f "$PUBLIC_ART_ROOT/COMPLETED" ] || [ -f "$PUBLIC_ART_ROOT/FAILED" ]; then
   echo "public vendor collection did not complete successfully: $PUBLIC_ART_ROOT" >&2
@@ -53,14 +55,20 @@ echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
 
 CURRENT_STEP="ingest_openalex"
 echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+LSIB_STEP_HEARTBEAT_PATH="$ART_RELEASE/current_step.txt" \
+LSIB_STEP_HEARTBEAT_LABEL="$CURRENT_STEP" \
 "$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" ingest-snapshot --snapshot-id "$SNAPSHOT_ID" --collector openalex_bulk
 
 CURRENT_STEP="ingest_notices"
 echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+LSIB_STEP_HEARTBEAT_PATH="$ART_RELEASE/current_step.txt" \
+LSIB_STEP_HEARTBEAT_LABEL="$CURRENT_STEP" \
 "$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" ingest-snapshot --snapshot-id "$SNAPSHOT_ID" --collector local_notice_export
 
 CURRENT_STEP="ingest_pubmed"
 echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+LSIB_STEP_HEARTBEAT_PATH="$ART_RELEASE/current_step.txt" \
+LSIB_STEP_HEARTBEAT_LABEL="$CURRENT_STEP" \
 "$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" ingest-snapshot --snapshot-id "$SNAPSHOT_ID" --collector pubmed_index
 
 CURRENT_STEP="materialize_canonical"

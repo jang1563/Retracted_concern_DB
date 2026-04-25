@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        python-version: ["3.8", "3.9", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -36,26 +36,60 @@ jobs:
       - name: Verify release artifacts exist
         run: |
           test -f artifacts/sample_release/benchmark_v1.jsonl
+          test -f artifacts/sample_release/benchmark_v1.csv
           test -f artifacts/sample_release/summary.json
           test -f artifacts/sample_release/leakage_report.json
+          test -f artifacts/sample_release/splits.json
           test -f artifacts/sample_release/task_a_baselines.json
           test -f artifacts/sample_release/task_a_robustness.json
           test -f artifacts/sample_release/task_a_calibration_curves.svg
+          test -f artifacts/sample_release/task_a_pr_curves.svg
           test -f artifacts/sample_release/task_b_baseline.json
+          test -f artifacts/sample_release/adjudication_queue.csv
+          test -f artifacts/sample_release/adjudication_queue_summary.json
+          test -f artifacts/sample_release/adjudication_protocol.md
           test -f artifacts/sample_release/experiment_report.md
+          test -f artifacts/sample_release/experiment_report.json
+          test -f artifacts/sample_release/internal_curation_queue.json
           test -f artifacts/site/index.html
           test -f artifacts/site/policy.html
+          test -f artifacts/site/changes.html
+          test -f artifacts/site/records.json
+          test ! -f artifacts/site/curation_queue.html
 
-      - name: Verify leakage audit passed
+      - name: Verify demo artifact contracts
         env:
           PYTHONPATH: src
         run: |
           python - <<'PY'
           import json, sys
+
+          def load(path):
+              with open(path) as handle:
+                  return json.load(handle)
+
           with open("artifacts/sample_release/leakage_report.json") as f:
               report = json.load(f)
           if not report.get("passed"):
               print("Leakage audit failed:", json.dumps(report, indent=2))
               sys.exit(1)
-          print("Leakage audit passed.")
+
+          splits = load("artifacts/sample_release/splits.json")
+          robustness = load("artifacts/sample_release/task_a_robustness.json")
+          site_records = load("artifacts/site/records.json")
+          expected_robustness = {
+              "task_a_12m",
+              "task_a_12m_venue_holdout",
+              "task_a_12m_publisher_holdout",
+              "task_a_36m",
+              "task_a_36m_venue_holdout",
+              "task_a_36m_publisher_holdout",
+          }
+          if len(splits) != 11:
+              raise SystemExit("Expected 11 synthetic split manifests, got %s" % len(splits))
+          if set(robustness) != expected_robustness:
+              raise SystemExit("Unexpected robustness split keys: %s" % sorted(robustness))
+          if len(site_records) != 6:
+              raise SystemExit("Expected 6 public site records, got %s" % len(site_records))
+          print("Demo artifact contracts passed.")
           PY

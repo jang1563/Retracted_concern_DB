@@ -239,6 +239,27 @@ def first_nonempty(*values):
     return None
 
 
+def coerce_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "t", "yes", "y"}:
+        return True
+    if text in {"0", "false", "f", "no", "n"}:
+        return False
+    try:
+        numeric = float(text)
+    except ValueError:
+        return default
+    if math.isfinite(numeric):
+        return bool(numeric)
+    return default
+
+
 def restore_inverted_abstract(inverted_index) -> str:
     if not inverted_index:
         return ""

@@ -29,7 +29,7 @@ def build_adjudication_rows(records: List[BenchmarkRecord], sample_size: int = 5
                     "notice_status": record.notice_status,
                     "core_tags": ";".join(record.core_tags),
                     "extension_tags": ";".join(record.extension_tags),
-                    "public_release_eligibility": "official_notice" if record.auto_publish else "curator_review",
+                    "public_release_eligibility": _public_release_eligibility(record),
                     "reviewer_a_decision": "",
                     "reviewer_b_decision": "",
                     "consensus_decision": "",
@@ -38,6 +38,14 @@ def build_adjudication_rows(records: List[BenchmarkRecord], sample_size: int = 5
                 }
             )
     return rows
+
+
+def _public_release_eligibility(record: BenchmarkRecord) -> str:
+    if record.auto_publish:
+        return "official_notice"
+    if record.curator_review_required:
+        return "curator_review"
+    return "none_known_at_snapshot"
 
 
 def export_adjudication_pack(
@@ -110,6 +118,12 @@ Create a doubly reviewed subset for validating weak labels, tag quality, and pub
 - `consensus_decision`
 - `wording_review`
 - `notes`
+
+## Public Release Eligibility Labels
+
+- `official_notice`: official notice metadata may be public
+- `curator_review`: non-notice external signals require curator review before public display
+- `none_known_at_snapshot`: background/negative record with no public integrity signal at the snapshot
 
 ## Current Pack Summary
 

@@ -31,8 +31,9 @@ fi
 sed "s|__RUN_ROOT__|$RUN_ROOT|g" "$TEMPLATE_PATH" > "$JOB_PATH"
 chmod +x "$JOB_PATH"
 
-JOB_ID="$(sbatch "$JOB_PATH" | awk '{print $NF}')"
 mkdir -p "$ART_ROOT"
+rm -f "$ART_ROOT/COMPLETED" "$ART_ROOT/FAILED" "$ART_ROOT/current_step.txt" "$ART_ROOT/failed_step.txt" "$ART_ROOT/summary.txt" "$ART_ROOT/job_id.txt"
+JOB_ID="$(sbatch "$JOB_PATH" | awk '{print $NF}')"
 printf "%s\n" "$JOB_ID" > "$ART_ROOT/job_id.txt"
 
 echo "public_vendor_collection_job_id=$JOB_ID"

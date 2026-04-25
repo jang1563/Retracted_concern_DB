@@ -1,8 +1,12 @@
 """Snapshot registration, collector ingest, and legacy compatibility wrappers."""
 
 import hashlib
+import json
+import os
+import time
+from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from .collectors import get_collector
 from .constants import (
@@ -16,7 +20,7 @@ from .constants import (
 )
 from .manifest import ManifestStore, SnapshotModifiedError
 from .materialize import materialize_canonical_snapshot
-from .utils import normalize_doi, slugify, write_jsonl
+from .utils import atomic_write_text, iter_jsonl, normalize_doi, open_text, write_json, write_jsonl
 
 
 RAW_TEMPLATE_LAYOUT = {
@@ -95,6 +99,8 @@ def ingest_snapshot(
     snapshot_id: str,
     collector_name: str,
     root_dir: Optional[Path] = None,
+    progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    progress_every_seconds: float = 30.0,
 ) -> Dict[str, object]:
     root_dir = Path(root_dir or Path.cwd())
     store = _manifest_store(root_dir)
@@ -109,9 +115,21 @@ def ingest_snapshot(
     quarantine_dir.mkdir(parents=True, exist_ok=True)
 
     run_id = store.start_run(snapshot_id, "ingest_snapshot", collector_name)
+    total_files = len(files)
     processed_files = 0
+    skipped_files = 0
+    total_normalized_rows = 0
+    total_quarantined_rows = 0
+    total_scope_skipped_rows = 0
+    _emit_progress(
+        progress_callback,
+        event="start",
+        snapshot_id=snapshot_id,
+        collector=collector_name,
+        total_files=total_files,
+    )
     try:
-        for file_meta in files:
+        for file_index, file_meta in enumerate(files, start=1):
             file_row = file_rows[file_meta.file_id]
             normalized_path = normalized_dir / ("%s.jsonl.gz" % file_meta.content_sha256)
             quarantine_path = quarantine_dir / ("%s.jsonl.gz" % file_meta.content_sha256)
@@ -120,11 +138,233 @@ def ingest_snapshot(
                 and normalized_path.exists()
                 and (quarantine_path.exists() or int(file_row["quarantined_rows"]) == 0)
             ):
+                skipped_files += 1
+                _emit_progress(
+                    progress_callback,
+                    event="file_skipped",
+                    snapshot_id=snapshot_id,
+                    collector=collector_name,
+                    total_files=total_files,
+                    file_index=file_index,
+                    relative_path=file_meta.relative_path,
+                    processed_files=processed_files,
+                    skipped_files=skipped_files,
+                )
                 continue
 
-            normalized_rows: List[dict] = []
-            quarantined_rows: List[dict] = []
-            row_errors: List[dict] = []
+            row_errors_path = quarantine_dir / ("%s.row_errors.jsonl" % file_meta.content_sha256)
+            scope_skip_summary_path = quarantine_dir / (
+                "%s.scope_skips.json" % file_meta.content_sha256
+            )
+            normalized_count = 0
+            quarantined_count = 0
+            scope_skipped_count = 0
+            scope_skip_counts = Counter()
+            raw_records_seen = 0
+            last_progress_emit = time.monotonic()
+            _emit_progress(
+                progress_callback,
+                event="file_started",
+                snapshot_id=snapshot_id,
+                collector=collector_name,
+                total_files=total_files,
+                file_index=file_index,
+                relative_path=file_meta.relative_path,
+                processed_files=processed_files,
+                skipped_files=skipped_files,
+            )
+            with _JsonlStreamWriter(normalized_path) as normalized_writer, _JsonlStreamWriter(
+                quarantine_path
+            ) as quarantine_writer, _JsonlStreamWriter(row_errors_path) as row_error_writer:
+                for line_number, raw_record in collector.iter_raw_records(file_meta):
+                    raw_records_seen += 1
+                    result = collector.normalize_record(
+                        raw_record,
+                        context={
+                            "snapshot_id": snapshot_id,
+                            "file_id": file_meta.file_id,
+                            "line_number": line_number,
+                        },
+                    )
+                    if result["kind"] == "normalized":
+                        normalized_writer.write(result["row"])
+                        normalized_count += 1
+                    elif result["kind"] == "normalized_many":
+                        for normalized_row in result["rows"]:
+                            normalized_writer.write(normalized_row)
+                            normalized_count += 1
+                    elif result["kind"] == "scope_skip":
+                        scope_skipped_count += 1
+                        scope_skip_counts[
+                            result.get("row", {}).get("reason", "unknown_scope_skip")
+                        ] += 1
+                    elif result["kind"] == "quarantine":
+                        quarantine_items = result.get("rows", [result["row"]])
+                        for item in quarantine_items:
+                            quarantine_row = dict(item)
+                            quarantine_writer.write(quarantine_row)
+                            quarantined_count += 1
+                            row_error_writer.write(
+                                {
+                                    "line_number": quarantine_row["line_number"],
+                                    "error_code": quarantine_row["error_code"],
+                                    "error_message": quarantine_row["error_message"],
+                                    "raw_excerpt": quarantine_row["raw_excerpt"],
+                                }
+                            )
+                    else:
+                        raise ValueError("Unknown normalize result kind: %s" % result["kind"])
+                    if progress_callback:
+                        now = time.monotonic()
+                        if progress_every_seconds <= 0 or (now - last_progress_emit) >= progress_every_seconds:
+                            _emit_progress(
+                                progress_callback,
+                                event="file_progress",
+                                snapshot_id=snapshot_id,
+                                collector=collector_name,
+                                total_files=total_files,
+                                file_index=file_index,
+                                relative_path=file_meta.relative_path,
+                                raw_records_seen=raw_records_seen,
+                                normalized_rows=normalized_count,
+                                quarantined_rows=quarantined_count,
+                                scope_skipped_rows=scope_skipped_count,
+                                processed_files=processed_files,
+                                skipped_files=skipped_files,
+                            )
+                            last_progress_emit = now
+
+            if scope_skipped_count:
+                write_json(
+                    scope_skip_summary_path,
+                    {
+                        "file_id": file_meta.file_id,
+                        "relative_path": file_meta.relative_path,
+                        "scope_skipped_rows": scope_skipped_count,
+                        "scope_skip_counts": dict(sorted(scope_skip_counts.items())),
+                    },
+                )
+                store.upsert_artifact(
+                    snapshot_id,
+                    "scope_skipped_%s" % collector_name,
+                    str(scope_skip_summary_path.relative_to(root_dir)),
+                    scope_skipped_count,
+                )
+            else:
+                scope_skip_summary_path.unlink(missing_ok=True)
+                store.delete_artifact(
+                    snapshot_id,
+                    "scope_skipped_%s" % collector_name,
+                    str(scope_skip_summary_path.relative_to(root_dir)),
+                )
+
+            store.update_file_parse_result(
+                file_id=file_meta.file_id,
+                parse_status="success",
+                parsed_rows=normalized_count,
+                quarantined_rows=quarantined_count,
+                error_count=quarantined_count,
+            )
+            store.replace_row_errors(file_meta.file_id, iter_jsonl(row_errors_path))
+            row_errors_path.unlink(missing_ok=True)
+            store.upsert_artifact(
+                snapshot_id,
+                "normalized_%s" % collector_name,
+                str(normalized_path.relative_to(root_dir)),
+                normalized_count,
+            )
+            store.upsert_artifact(
+                snapshot_id,
+                "quarantine_%s" % collector_name,
+                str(quarantine_path.relative_to(root_dir)),
+                quarantined_count,
+            )
+            processed_files += 1
+            total_normalized_rows += normalized_count
+            total_quarantined_rows += quarantined_count
+            total_scope_skipped_rows += scope_skipped_count
+            _emit_progress(
+                progress_callback,
+                event="file_completed",
+                snapshot_id=snapshot_id,
+                collector=collector_name,
+                total_files=total_files,
+                file_index=file_index,
+                relative_path=file_meta.relative_path,
+                raw_records_seen=raw_records_seen,
+                normalized_rows=normalized_count,
+                quarantined_rows=quarantined_count,
+                scope_skipped_rows=scope_skipped_count,
+                processed_files=processed_files,
+                skipped_files=skipped_files,
+                total_normalized_rows=total_normalized_rows,
+                total_quarantined_rows=total_quarantined_rows,
+                total_scope_skipped_rows=total_scope_skipped_rows,
+            )
+        store.finish_run(run_id, "success")
+    except Exception:
+        store.finish_run(run_id, "failed")
+        _emit_progress(
+            progress_callback,
+            event="failed",
+            snapshot_id=snapshot_id,
+            collector=collector_name,
+            total_files=total_files,
+            processed_files=processed_files,
+            skipped_files=skipped_files,
+        )
+        raise
+    _emit_progress(
+        progress_callback,
+        event="finished",
+        snapshot_id=snapshot_id,
+        collector=collector_name,
+        total_files=total_files,
+        processed_files=processed_files,
+        skipped_files=skipped_files,
+        total_normalized_rows=total_normalized_rows,
+        total_quarantined_rows=total_quarantined_rows,
+        total_scope_skipped_rows=total_scope_skipped_rows,
+    )
+    return {
+        "snapshot_id": snapshot_id,
+        "collector": collector_name,
+        "total_files": total_files,
+        "processed_files": processed_files,
+        "skipped_files": skipped_files,
+        "normalized_rows": total_normalized_rows,
+        "quarantined_rows": total_quarantined_rows,
+        "scope_skipped_rows": total_scope_skipped_rows,
+        "normalized_dir": normalized_dir,
+        "quarantine_dir": quarantine_dir,
+    }
+
+
+def build_openalex_scope_allowlist(
+    snapshot_id: str,
+    output_path: Path,
+    root_dir: Optional[Path] = None,
+) -> Dict[str, object]:
+    """Build DOI allowlist from non-OpenAlex sources before OpenAlex ingest.
+
+    The early OpenAlex scope filter can drop low-score rows without writing
+    normalized/quarantine payloads. This allowlist preserves rows that are needed
+    for PubMed joins or official notice matching even when OpenAlex topic scores
+    are weak or missing.
+    """
+
+    root_dir = Path(root_dir or Path.cwd())
+    output_path = Path(output_path)
+    store = _manifest_store(root_dir)
+    store.assert_snapshot_frozen(snapshot_id)
+    snapshot = store.get_snapshot(snapshot_id)
+
+    dois = set()
+    doi_counts_by_collector = Counter()
+    for collector_name in (NOTICE_COLLECTOR, PUBMED_COLLECTOR):
+        collector = get_collector(collector_name)
+        files = collector.discover_files(Path(snapshot["raw_root"]), store, snapshot_id)
+        for file_meta in files:
             for line_number, raw_record in collector.iter_raw_records(file_meta):
                 result = collector.normalize_record(
                     raw_record,
@@ -134,57 +374,26 @@ def ingest_snapshot(
                         "line_number": line_number,
                     },
                 )
+                rows = []
                 if result["kind"] == "normalized":
-                    normalized_rows.append(result["row"])
+                    rows = [result["row"]]
                 elif result["kind"] == "normalized_many":
-                    normalized_rows.extend(result["rows"])
-                else:
-                    quarantine_items = result.get("rows", [result["row"]])
-                    for item in quarantine_items:
-                        quarantine_row = dict(item)
-                        quarantined_rows.append(quarantine_row)
-                        row_errors.append(
-                            {
-                                "line_number": quarantine_row["line_number"],
-                                "error_code": quarantine_row["error_code"],
-                                "error_message": quarantine_row["error_message"],
-                                "raw_excerpt": quarantine_row["raw_excerpt"],
-                            }
-                        )
+                    rows = result["rows"]
+                for row in rows:
+                    doi = normalize_doi(row.get("doi", ""))
+                    if doi:
+                        dois.add(doi)
+                        doi_counts_by_collector[collector_name] += 1
 
-            write_jsonl(normalized_path, normalized_rows)
-            write_jsonl(quarantine_path, quarantined_rows)
-            store.update_file_parse_result(
-                file_id=file_meta.file_id,
-                parse_status="success",
-                parsed_rows=len(normalized_rows),
-                quarantined_rows=len(quarantined_rows),
-                error_count=len(row_errors),
-            )
-            store.replace_row_errors(file_meta.file_id, row_errors)
-            store.upsert_artifact(
-                snapshot_id,
-                "normalized_%s" % collector_name,
-                str(normalized_path.relative_to(root_dir)),
-                len(normalized_rows),
-            )
-            store.upsert_artifact(
-                snapshot_id,
-                "quarantine_%s" % collector_name,
-                str(quarantine_path.relative_to(root_dir)),
-                len(quarantined_rows),
-            )
-            processed_files += 1
-        store.finish_run(run_id, "success")
-    except Exception:
-        store.finish_run(run_id, "failed")
-        raise
+    text = "\n".join(sorted(dois))
+    if text:
+        text += "\n"
+    atomic_write_text(output_path, text)
     return {
         "snapshot_id": snapshot_id,
-        "collector": collector_name,
-        "processed_files": processed_files,
-        "normalized_dir": normalized_dir,
-        "quarantine_dir": quarantine_dir,
+        "output_path": output_path,
+        "doi_count": len(dois),
+        "doi_counts_by_collector": dict(doi_counts_by_collector),
     }
 
 
@@ -251,6 +460,45 @@ def _read_all_rows(directory: Path) -> List[dict]:
 
         rows.extend(read_jsonl(path))
     return rows
+
+
+def _emit_progress(
+    progress_callback: Optional[Callable[[Dict[str, object]], None]], **event: object
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback(dict(event))
+
+
+class _JsonlStreamWriter:
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.tmp_path = _stream_tmp_path(self.path)
+        self.handle = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle_context = open_text(self.tmp_path, "wt")
+        self.handle = self.handle_context.__enter__()
+        return self
+
+    def write(self, row: dict) -> None:
+        self.handle.write(json.dumps(row, sort_keys=True))
+        self.handle.write("\n")
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.handle_context.__exit__(exc_type, exc, traceback)
+        if exc_type is None:
+            os.replace(self.tmp_path, self.path)
+        else:
+            self.tmp_path.unlink(missing_ok=True)
+        return False
+
+
+def _stream_tmp_path(path: Path) -> Path:
+    if path.name.endswith(".gz"):
+        return path.parent / (path.name[: -len(".gz")] + ".tmp.gz")
+    return path.parent / (path.name + ".tmp")
 
 
 def _raw_layout_readme() -> str:

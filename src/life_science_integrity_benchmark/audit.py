@@ -19,6 +19,8 @@ def build_leakage_report(records: List[BenchmarkRecord], snapshot_date: str) -> 
 
     for record in records:
         publication = parse_date(record.publication_date)
+        if record.snapshot_date and record.snapshot_date != snapshot_date:
+            snapshot_violations.append(record.doi)
         if record.first_signal_date and parse_date(record.first_signal_date) < publication:
             invalid_event_order.append(record.doi)
         if record.first_notice_date and parse_date(record.first_notice_date) < publication:

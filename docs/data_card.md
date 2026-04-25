@@ -48,7 +48,7 @@ This benchmark supports research on triaging life-science papers for further int
 - Publication-time cutoff stored as `task_a_feature_cutoff_date`
 - History features tracked with explicit `author_history_cutoff_date` and `journal_history_cutoff_date`
 - Post-publication signals and notices are excluded from Task A features
-- Split artifacts include time splits and explicit grouped holdout variants
+- Split artifacts include time splits and grouped holdout variants when the candidate holdout is large enough to interpret
 
 ## Known Limitations
 

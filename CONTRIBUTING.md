@@ -23,7 +23,7 @@ Open an issue with:
 - How records are identified (DOI-level? journal-level? author-level?)
 - Redistribution rights at the record level (full text, metadata, or link-only)
 - Whether the source is an official notice or a non-notice external signal
-- A small sample of records (rights permitting)
+- A small sample of rights-safe public metadata or links, with no private material or unreviewed allegations about named people
 
 New sources that cannot be integrated as rights-safe link-only provenance will not be merged.
 

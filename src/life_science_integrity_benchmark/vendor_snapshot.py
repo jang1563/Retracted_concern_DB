@@ -235,20 +235,25 @@ def stage_vendor_archive_to_raw_snapshot(
 
     retraction_watch_output = None
     retraction_watch_result = {"row_count": 0}
-    if retraction_watch_vendor is not None:
-        source_csv = _find_first_file(
-            retraction_watch_vendor,
-            ("retraction_watch.csv", "retraction_watch.csv.gz", ".csv", ".csv.gz"),
+    if retraction_watch_vendor is None:
+        raise FileNotFoundError(
+            "Missing Retraction Watch vendor archive at or before %s under %s"
+            % (freeze_end, vendor_root / "retraction_watch")
         )
-        if source_csv is not None:
-            retraction_watch_output = notices_raw / (
-                "retraction_watch_%s.csv.gz" % retraction_watch_vendor.name
-            )
-            retraction_watch_result = extract_retraction_watch_csv(
-                source_csv,
-                retraction_watch_output,
-                snapshot_label=snapshot_label,
-            )
+    source_csv = _find_first_file(
+        retraction_watch_vendor,
+        ("retraction_watch.csv", "retraction_watch.csv.gz", ".csv", ".csv.gz"),
+    )
+    if source_csv is None:
+        raise FileNotFoundError("Missing Retraction Watch CSV under %s" % retraction_watch_vendor)
+    retraction_watch_output = notices_raw / (
+        "retraction_watch_%s.csv.gz" % retraction_watch_vendor.name
+    )
+    retraction_watch_result = extract_retraction_watch_csv(
+        source_csv,
+        retraction_watch_output,
+        snapshot_label=snapshot_label,
+    )
 
     pubmed_files = _stage_pubmed_vendor(pubmed_baseline_vendor, pubmed_update_vendor, pubmed_raw, mode=mode)
 
@@ -530,7 +535,6 @@ def _latest_retraction_watch_dir(root: Path, freeze_end: str) -> Optional[Path]:
     if not root.exists():
         return None
     candidates = []
-    future_candidates = []
     for path in root.iterdir():
         if not path.is_dir():
             continue
@@ -540,11 +544,7 @@ def _latest_retraction_watch_dir(root: Path, freeze_end: str) -> Optional[Path]:
             continue
         if str(date_value) <= freeze_end:
             candidates.append(path)
-        else:
-            future_candidates.append(path)
     if not candidates:
-        if future_candidates:
-            return sorted(future_candidates)[-1]
         return None
     return sorted(candidates)[-1]
 

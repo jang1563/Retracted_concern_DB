@@ -37,7 +37,7 @@ Subfield distribution: `bioinformatics=5`, `biology=5`, `biomedicine=6`.
 
 ## Leakage Audit
 
-The audit is covered by a **sensitivity battery** in `tests/test_benchmark.py`: seven unit tests inject known-leaky patterns (pre-publication signal/notice dates, post-snapshot events, mismatched `task_a_feature_cutoff_date`, future-censored author/journal history cutoffs, and each missing-provenance case) and assert that the audit both (a) fails overall and (b) attributes the failure to the correct check. One more test confirms the audit passes on the unmodified corpus. So a `PASS` in this report is informative, not vacuous.
+The audit is covered by a **sensitivity battery** in `tests/test_benchmark.py`: eight unit tests inject known-leaky patterns (pre-publication signal/notice dates, post-snapshot events, record snapshot-date mismatch, mismatched `task_a_feature_cutoff_date`, future-censored author/journal history cutoffs, and each missing-provenance case) and assert that the audit both (a) fails overall and (b) attributes the failure to the correct check. One more test confirms the audit passes on the unmodified corpus. So a `PASS` in this report is informative, not vacuous.
 
 The `audit-leakage` CLI step produced a clean report on this release:
 
@@ -65,20 +65,19 @@ Every baseline run now includes a `calibration_curve` list (per-bin mean-predict
 
 ## Splits
 
-14 split manifests are produced per release: a primary time split and three grouped holdouts (author cluster, venue, publisher) for each of Task A 12m, Task A 36m, and Task B, plus noisy-date analysis splits.
+11 split manifests are produced on the synthetic corpus: primary time splits, noisy-date Task A analysis splits, and grouped holdouts only when the held-out group has at least two records. Task A grouped holdouts also require both positive and negative labels in the held-out group, so the one-record author-cluster candidates are intentionally skipped here.
 
 | Split | Kind | Train | Val | Test |
 | --- | --- | --- | --- | --- |
 | `task_a_12m` | time | 8 | 3 | 5 |
-| `task_a_12m_author_cluster_holdout` | group | 8 | 3 | 1 |
 | `task_a_12m_venue_holdout` | group | 7 | 2 | 3 |
 | `task_a_12m_publisher_holdout` | group | 6 | 2 | 5 |
+| `task_a_12m_noisy_date` | time | 0 | 0 | 0 |
 | `task_a_36m` | time | 6 | 2 | 4 |
-| `task_a_36m_author_cluster_holdout` | group | 6 | 2 | 1 |
-| `task_a_36m_venue_holdout` | group | 6 | 2 | 2 |
-| `task_a_36m_publisher_holdout` | group | 4 | 1 | 5 |
+| `task_a_36m_venue_holdout` | group | 6 | 1 | 2 |
+| `task_a_36m_publisher_holdout` | group | 4 | 1 | 4 |
+| `task_a_36m_noisy_date` | time | 0 | 0 | 0 |
 | `task_b` | time | 8 | 3 | 5 |
-| `task_b_author_cluster_holdout` | group | 8 | 3 | 1 |
 | `task_b_venue_holdout` | group | 7 | 2 | 3 |
 | `task_b_publisher_holdout` | group | 6 | 2 | 5 |
 
@@ -106,25 +105,25 @@ On the sample corpus, AUPRC-by-subfield reveals a degenerate `biology=0.0` in ev
 
 ## Task A Robustness (Grouped Holdouts)
 
-New in this release: every Task A baseline now also runs on the three grouped-holdout manifests (author cluster, venue, publisher) in addition to the primary time split. This is the empirical test of whether the model is learning a transferable signal or a per-venue / per-publisher artifact.
+New in this release: every Task A baseline now also runs on validity-gated grouped-holdout manifests in addition to the primary time split. This is the empirical test of whether the model is learning a transferable signal or a per-venue / per-publisher artifact. On the synthetic corpus, author-cluster holdouts are skipped because each candidate cluster has only one record.
 
 **Task A 12m — AUPRC by model × split:**
 
 | Model | primary | author_cluster_holdout | venue_holdout | publisher_holdout |
 | --- | --- | --- | --- | --- |
-| metadata_logistic | 0.700 | **0.000** | 1.000 | 1.000 |
-| abstract_encoder (hashing) | 0.700 | **0.000** | 0.500 | 1.000 |
-| metadata + text fusion | 0.700 | **0.000** | 1.000 | 1.000 |
+| metadata_logistic | 0.700 | - | 1.000 | 1.000 |
+| abstract_encoder (hashing) | 0.700 | - | 0.500 | 1.000 |
+| metadata + text fusion | 0.700 | - | 1.000 | 1.000 |
 
 **Task A 36m — AUPRC by model × split:**
 
 | Model | primary | author_cluster_holdout | venue_holdout | publisher_holdout |
 | --- | --- | --- | --- | --- |
-| metadata_logistic | 0.917 | 1.000 | 1.000 | 1.000 |
-| abstract_encoder (hashing) | 0.806 | 1.000 | 1.000 | 1.000 |
-| metadata + text fusion | 0.917 | 1.000 | 1.000 | 1.000 |
+| metadata_logistic | 0.917 | - | 1.000 | 1.000 |
+| abstract_encoder (hashing) | 0.806 | - | 1.000 | 0.833 |
+| metadata + text fusion | 0.917 | - | 1.000 | 1.000 |
 
-The 12m author-cluster holdout collapsing to AUPRC=0.000 across all three baselines is an artifact of the 1-record test fold (the held-out cluster has a single positive in the test slice that the models consistently rank low). On 16 synthetic records these numbers are not individually informative, but they demonstrate that the robustness harness does surface distributional shift — on real data the same table will show meaningful deltas between the primary split and the grouped holdouts, quantifying how much of each baseline's headline AUPRC comes from venue / publisher / authorship recurrence versus generalizable signal.
+The `-` author-cluster cells are intentional: the synthetic corpus has only one record per author cluster, so those holdouts would be degenerate. On 16 synthetic records these numbers are not individually informative, but they demonstrate that the robustness harness surfaces distributional shift while refusing holdouts that are too small to interpret. On real data the same table will show meaningful deltas between the primary split and the valid grouped holdouts, quantifying how much of each baseline's headline AUPRC comes from venue / publisher / authorship recurrence versus generalizable signal.
 
 The raw per-split runs, including all metrics (AUPRC, Recall@1%, Recall@5%, ECE, subfield-AUPRC), are in [artifacts/sample_release/task_a_robustness.json](../artifacts/sample_release/task_a_robustness.json) after running the demo.
 
@@ -161,12 +160,12 @@ The landing page displays the snapshot date, public-record count, and the explic
 ```
 artifacts/sample_release/
 ├── benchmark_v1.jsonl               # canonical per-record release
-├── benchmark_v1.csv                 # same content, CSV
+├── benchmark_v1.csv                 # flat CSV projection with Task A scalar features
 ├── summary.json                     # counts and snapshot metadata
-├── splits.json                      # 14 split manifests
+├── splits.json                      # 11 split manifests on the synthetic corpus
 ├── leakage_report.json              # audit-leakage output
 ├── task_a_baselines.json            # primary-split baselines (2 horizons × 3 models)
-├── task_a_robustness.json           # baselines across 8 manifests (primary + 3 holdouts × 2 horizons)
+├── task_a_robustness.json           # baselines across valid Task A manifests (6 on the synthetic corpus)
 ├── task_b_baseline.json             # Task B keyword baseline
 ├── adjudication_queue.csv           # double-review queue for labeled records
 ├── adjudication_queue_summary.json
@@ -178,7 +177,7 @@ artifacts/sample_release/
 
 ## Test Suite
 
-The repository ships with `tests/test_benchmark.py` covering dataset logic, label derivation, split construction, leakage auditing (including a seven-test sensitivity battery — pre-publication events, post-snapshot events, task-A feature-cutoff mismatch, future-censored author and journal history, each missing-provenance case, and a clean-corpus baseline), Task A cross-split robustness, baseline model fitting (including feature-importance structure and calibration-curve bin validation), SVG calibration-diagram generation, site generation, ingest manifests, and the vendor-archive → raw-snapshot pipeline. All 30 tests pass on Python 3.13 with zero external dependencies.
+The repository ships with `tests/test_benchmark.py` covering dataset logic, label derivation, split construction, release CSV Task A feature columns, leakage auditing (including an eight-test sensitivity battery — pre-publication events, post-snapshot events, record snapshot-date mismatch, task-A feature-cutoff mismatch, future-censored author and journal history, each missing-provenance case, and a clean-corpus baseline), Task A cross-split robustness, baseline model fitting (including feature-importance structure, metric input validation, model feature-shape validation, and calibration-curve bin validation), SVG calibration-diagram generation, site generation, ingest manifests, canonical validation of snapshot-date and summary-count contracts, manifest artifact-row replacement, release bundle stale-summary cleanup, CI artifact contract checks, frozen vendor collection guards, PubMed boolean normalization, governance-safe issue routing, release-reporting contracts, Cayuga marker-state precedence, adjudication eligibility labels, and the vendor-archive → raw-snapshot pipeline. All 78 tests pass locally on Python 3.8, and CI covers Python 3.8, 3.9, 3.11, and 3.13 with zero external dependencies.
 
 ## What Real-Data Results Will Add
 

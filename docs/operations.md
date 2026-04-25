@@ -17,6 +17,8 @@ export CROSSREF_SOURCE_MODE="skip"
   /data/vendor_archive /data/raw_snapshot /tmp/lsib-freeze-run 2026-03-freeze
 ```
 
+OpenAlex collection records the freeze end date and prunes any `updated_date=YYYY-MM-DD` works partitions after that date before writing the vendor manifest, so reruns do not silently fall forward into later monthly data. PubMed collection similarly keeps only same-year baseline files and updatefiles whose directory-listing modified date is at or before the freeze end.
+
 ### Monthly freeze with Crossref Metadata Plus
 
 ```bash
@@ -35,6 +37,8 @@ PYTHONPATH=src python3 -m life_science_integrity_benchmark.cli \
   stage-vendor-archive --vendor-root /data/vendor_archive \
   --raw-root /data/raw_snapshot --snapshot-label 2026-03-freeze
 ```
+
+OpenAlex, PubMed, and Retraction Watch are required for staging; Crossref Metadata Plus is optional only when `--allow-missing-crossref` is passed for an open-data-only run.
 
 Or in one shot:
 
@@ -142,11 +146,46 @@ Watch a submitted real-ingest job from the local machine:
 ./scripts/cayuga/watch_real_ingest_from_local.sh "$REMOTE_HOST" "$RUN_ROOT" 60 20
 ```
 
+For the current open-data downstream release path (the v0.2 real-data build),
+use the local wrappers that query Cayuga with a compatible Slurm client and
+then harvest/rebuild the results doc when the release is ready:
+
+```bash
+./scripts/cayuga/finalize_open_data_release_from_local.sh "$REMOTE_HOST" "$RUN_ROOT"
+./scripts/cayuga/watch_open_data_release_from_local.sh "$REMOTE_HOST" "$RUN_ROOT" 300
+```
+
+On `cayuga-phobos`, the default `squeue` in `PATH` may point to a newer Slurm
+client that reports an incompatible-protocol error. The helpers above avoid
+that footgun by explicitly selecting a compatible Cayuga Slurm install before
+querying job state.
+
+If the downstream job stays in one stage for a long time, the finalize/watch
+helpers now surface `current_step_age_seconds`, `log_age_seconds`, and a
+derived `stale_progress=yes` warning once those ages exceed 6 hours by default.
+This does not mean the job is dead by itself: if `resource_activity=observed`
+also appears, the more accurate interpretation is "quiet but still consuming
+CPU / I/O". Override the warning threshold with
+`STEP_STALE_THRESHOLD_SECONDS=<seconds>` and
+`LOG_STALE_THRESHOLD_SECONDS=<seconds>` if needed.
+
+On reruns that use the current sbatch templates, `ingest-snapshot` also updates
+`current_step.txt` from inside the Python process, so the file can advance from
+plain step names like `ingest_openalex` to heartbeat-style payloads such as
+`ingest_openalex 17/2127 raw_records=...`. That makes the stale-progress
+warning substantially more trustworthy for long OpenAlex ingests.
+
 Morning status summary:
 
 ```bash
 ./scripts/cayuga/collect_morning_status.sh "$RUN_ROOT"
 ```
+
+That report now emits an `artifact_status` line for each major artifact root
+(`preflight`, `sample_stress`, `real_release`, `public_vendor_collection`,
+`open_data_release`). The status is resolved with `FAILED` taking precedence
+over `COMPLETED`, then `IN_PROGRESS`, then `JOB_RECORDED`, which makes reruns
+easier to triage when old marker files might otherwise be misleading.
 
 Cancel recorded Cayuga jobs from the cluster:
 
@@ -166,13 +205,27 @@ cd "$RUN_ROOT/repo"
 ./scripts/cayuga/submit_open_data_downstream_only.sh "$RUN_ROOT"
 ```
 
+From the local machine, the easiest monitor/finalize sequence after submission is:
+
+```bash
+./scripts/cayuga/watch_open_data_release_from_local.sh "$REMOTE_HOST" "$RUN_ROOT" 300
+```
+
+Or, if you only want a one-shot status check that harvests immediately when the
+release completes:
+
+```bash
+./scripts/cayuga/finalize_open_data_release_from_local.sh "$REMOTE_HOST" "$RUN_ROOT"
+```
+
 What it does:
 
 - `#SBATCH --time=5-00:00:00` so ingest + materialize + build-core + splits + audit + training + site + report fit inside one job.
 - Does not wipe `$WORK_ROOT` or any existing runtime root on entry.
 - Does not gate on the public-vendor-collection `COMPLETED` marker, because the raw snapshot being complete is the real precondition.
-- Uses a separate `artifacts/open_data_runtime/` (not the stale `public_vendor_collection_work/runtime_root/`), which means a clean ingest manifest and no crashed-state contamination.
+- Uses a separate node-local runtime root (`$SLURM_TMPDIR` when available, otherwise `$TMPDIR`/`/tmp`) instead of the stale `public_vendor_collection_work/runtime_root/`, which keeps the ingest manifest clean and reduces exposure to shared scratch I/O failures.
 - Writes release artifacts to `artifacts/open_data_release/` and the site to `artifacts/open_data_site/`.
+- Current submit helpers clear stale `COMPLETED` / `FAILED` / step-marker files immediately after a new `sbatch` succeeds, and the watch helpers treat `FAILED` as higher priority than `COMPLETED` if both exist. That prevents reruns from inheriting an old success signal.
 
 The `scu-cpu` partition on Cayuga permits up to 7-day walltimes; 5 days is a conservative default. The original 24h in `public_vendor_collection.sbatch.in` and `open_data_finalize_template.sbatch.in` is a template choice, not a cluster ceiling.
 

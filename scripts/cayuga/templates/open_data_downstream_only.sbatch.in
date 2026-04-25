@@ -10,13 +10,15 @@ set -euo pipefail
 RUN_ROOT="__RUN_ROOT__"
 ART_RELEASE="$RUN_ROOT/artifacts/open_data_release"
 ART_SITE="$RUN_ROOT/artifacts/open_data_site"
-RUNTIME_ROOT="$RUN_ROOT/artifacts/open_data_runtime"
+LOCAL_RUNTIME_BASE="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}"
+RUNTIME_ROOT="${LSIB_RUNTIME_ROOT_OVERRIDE:-$LOCAL_RUNTIME_BASE/lsib_open_data_runtime_${SLURM_JOB_ID:-$$}}"
 RAW_ROOT="$RUN_ROOT/raw/public_open_data_snapshot"
 REPO_ROOT="$RUN_ROOT/repo"
 SNAPSHOT_LABEL="${SNAPSHOT_LABEL:-2026-03-freeze}"
 SANITIZED_LABEL="${SNAPSHOT_LABEL//-/_}"
 SNAPSHOT_ID="${SNAPSHOT_ID_OVERRIDE:-public_open_data_${SANITIZED_LABEL}}"
 CANONICAL_SOURCE_DIR="$RUNTIME_ROOT/data/normalized/$SNAPSHOT_ID/canonical"
+OPENALEX_SCOPE_ALLOWLIST="$ART_RELEASE/openalex_scope_allowlist.txt"
 CURRENT_STEP="bootstrap"
 COMMON_SH="$REPO_ROOT/scripts/cayuga/common_job_env.sh"
 
@@ -30,6 +32,7 @@ PYTHON_BIN="$(command -v python3 || command -v python)"
 
 cd "$REPO_ROOT"
 export PYTHONPATH=src
+echo "runtime_root=$RUNTIME_ROOT"
 
 # Unlike open_data_finalize_template, this job does not require
 # the public-vendor-collection COMPLETED marker. It runs whenever
@@ -49,16 +52,32 @@ echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
   --raw-root "$RAW_ROOT" \
   --source-family openalex_notices
 
+CURRENT_STEP="build_openalex_scope_allowlist"
+echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+"$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
+  --root-dir "$RUNTIME_ROOT" \
+  build-openalex-scope-allowlist \
+  --snapshot-id "$SNAPSHOT_ID" \
+  --output-path "$OPENALEX_SCOPE_ALLOWLIST"
+
 CURRENT_STEP="ingest_openalex"
 echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+export LSIB_OPENALEX_EARLY_SCOPE_FILTER=1
+export LSIB_OPENALEX_SCOPE_DOI_ALLOWLIST="$OPENALEX_SCOPE_ALLOWLIST"
+LSIB_STEP_HEARTBEAT_PATH="$ART_RELEASE/current_step.txt" \
+LSIB_STEP_HEARTBEAT_LABEL="$CURRENT_STEP" \
 "$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" ingest-snapshot --snapshot-id "$SNAPSHOT_ID" --collector openalex_bulk
 
 CURRENT_STEP="ingest_notices"
 echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+LSIB_STEP_HEARTBEAT_PATH="$ART_RELEASE/current_step.txt" \
+LSIB_STEP_HEARTBEAT_LABEL="$CURRENT_STEP" \
 "$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" ingest-snapshot --snapshot-id "$SNAPSHOT_ID" --collector local_notice_export
 
 CURRENT_STEP="ingest_pubmed"
 echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+LSIB_STEP_HEARTBEAT_PATH="$ART_RELEASE/current_step.txt" \
+LSIB_STEP_HEARTBEAT_LABEL="$CURRENT_STEP" \
 "$PYTHON_BIN" -m life_science_integrity_benchmark.cli --root-dir "$RUNTIME_ROOT" ingest-snapshot --snapshot-id "$SNAPSHOT_ID" --collector pubmed_index
 
 CURRENT_STEP="materialize_canonical"

@@ -13,7 +13,7 @@ fi
 VENDOR_ROOT="$1"
 COLLECTION_DATE="${2:-$(date +%F)}"
 TARGET_DIR="$VENDOR_ROOT/retraction_watch/$COLLECTION_DATE"
-REPO_URL="https://gitlab.com/crossref/retraction-watch-data.git"
+REPO_URL="${RETRACTION_WATCH_REPO_URL:-https://gitlab.com/crossref/retraction-watch-data.git}"
 CLONE_DIR="$TARGET_DIR/repo"
 GIT_BIN="${GIT_BIN:-git}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -21,13 +21,23 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 mkdir -p "$TARGET_DIR"
 
 if [ -d "$CLONE_DIR/.git" ]; then
-  "$GIT_BIN" -C "$CLONE_DIR" fetch --depth 1 origin
-  "$GIT_BIN" -C "$CLONE_DIR" reset --hard FETCH_HEAD
+  "$GIT_BIN" -C "$CLONE_DIR" fetch origin
 else
-  "$GIT_BIN" clone --depth 1 "$REPO_URL" "$CLONE_DIR"
+  "$GIT_BIN" clone "$REPO_URL" "$CLONE_DIR"
 fi
 
-SOURCE_CSV="$(find "$CLONE_DIR" -maxdepth 3 -type f \( -name '*.csv' -o -name '*.csv.gz' \) | sort | head -n 1)"
+if [ -n "${RETRACTION_WATCH_GIT_REF:-}" ]; then
+  TARGET_COMMIT="$RETRACTION_WATCH_GIT_REF"
+else
+  TARGET_COMMIT="$("$GIT_BIN" -C "$CLONE_DIR" rev-list -n 1 --before="$COLLECTION_DATE 23:59:59 +0000" --all)"
+fi
+if [ -z "$TARGET_COMMIT" ]; then
+  echo "could not locate Retraction Watch git commit at or before $COLLECTION_DATE" >&2
+  exit 1
+fi
+"$GIT_BIN" -C "$CLONE_DIR" reset --hard "$TARGET_COMMIT"
+
+SOURCE_CSV="$(find "$CLONE_DIR" -maxdepth 3 -type f \( -name '*.csv' -o -name '*.csv.gz' \) | sort | sed -n '1p')"
 if [ -z "$SOURCE_CSV" ]; then
   echo "could not locate retraction watch csv in $CLONE_DIR" >&2
   exit 1

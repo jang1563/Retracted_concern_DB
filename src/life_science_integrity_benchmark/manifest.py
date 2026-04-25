@@ -266,16 +266,32 @@ class ManifestStore:
                 "SELECT relative_path, content_sha256 FROM files WHERE snapshot_id = ?",
                 (snapshot_id,),
             ).fetchall()
-        for row in rows:
-            path = raw_root / row["relative_path"]
-            if not path.exists():
+        registered = {row["relative_path"]: row["content_sha256"] for row in rows}
+        current = {}
+        for _, (relative_root, suffixes) in DEFAULT_COLLECTOR_LAYOUT.items():
+            collector_root = raw_root / relative_root
+            if not collector_root.exists():
+                continue
+            for path in discover_files(collector_root, suffixes):
+                relative_path = str(path.relative_to(raw_root))
+                current[relative_path] = hash_file_sha256(path)
+
+        missing_paths = sorted(set(registered) - set(current))
+        if missing_paths:
+            raise SnapshotModifiedError(
+                "snapshot modified: missing file %s" % missing_paths[0]
+            )
+        added_paths = sorted(set(current) - set(registered))
+        if added_paths:
+            raise SnapshotModifiedError(
+                "snapshot modified: added file %s" % added_paths[0]
+            )
+
+        for relative_path, content_sha256 in registered.items():
+            current_sha = current[relative_path]
+            if current_sha != content_sha256:
                 raise SnapshotModifiedError(
-                    "snapshot modified: missing file %s" % row["relative_path"]
-                )
-            current_sha = hash_file_sha256(path)
-            if current_sha != row["content_sha256"]:
-                raise SnapshotModifiedError(
-                    "snapshot modified: checksum mismatch for %s" % row["relative_path"]
+                    "snapshot modified: checksum mismatch for %s" % relative_path
                 )
 
     def start_run(self, snapshot_id: str, stage_name: str, collector_name: str) -> str:
@@ -370,6 +386,41 @@ class ManifestStore:
                     row_count,
                     utcnow_iso(),
                 ),
+            )
+
+    def replace_artifacts(
+        self, snapshot_id: str, artifact_kind: str, artifacts: Iterable[tuple]
+    ) -> None:
+        with self._transact() as connection:
+            connection.execute(
+                "DELETE FROM artifacts WHERE snapshot_id = ? AND artifact_kind = ?",
+                (snapshot_id, artifact_kind),
+            )
+            for relative_path, row_count in artifacts:
+                connection.execute(
+                    """
+                    INSERT INTO artifacts (
+                        artifact_id, snapshot_id, artifact_kind, relative_path, row_count, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        uuid.uuid4().hex,
+                        snapshot_id,
+                        artifact_kind,
+                        relative_path,
+                        row_count,
+                        utcnow_iso(),
+                    ),
+                )
+
+    def delete_artifact(self, snapshot_id: str, artifact_kind: str, relative_path: str) -> None:
+        with self._transact() as connection:
+            connection.execute(
+                """
+                DELETE FROM artifacts
+                WHERE snapshot_id = ? AND artifact_kind = ? AND relative_path = ?
+                """,
+                (snapshot_id, artifact_kind, relative_path),
             )
 
     def list_artifacts(

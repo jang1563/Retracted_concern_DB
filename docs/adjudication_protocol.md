@@ -20,6 +20,9 @@ The operational adjudication pack is generated into each release directory as `a
 
 - `official_notice`
 - `curator_review`
+- `none_known_at_snapshot`
+
+`none_known_at_snapshot` is used for background/negative adjudication rows with no public integrity signal at the snapshot. It should not be treated as a curator-gated allegation.
 
 ## Release Rule
 
