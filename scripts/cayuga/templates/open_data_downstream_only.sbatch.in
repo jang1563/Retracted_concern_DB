@@ -58,7 +58,8 @@ echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
   --root-dir "$RUNTIME_ROOT" \
   build-openalex-scope-allowlist \
   --snapshot-id "$SNAPSHOT_ID" \
-  --output-path "$OPENALEX_SCOPE_ALLOWLIST"
+  --output-path "$OPENALEX_SCOPE_ALLOWLIST" \
+  --skip-pubmed
 
 CURRENT_STEP="ingest_openalex"
 echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"

@@ -1333,6 +1333,15 @@ class BenchmarkTests(unittest.TestCase):
                 allowlist_path.read_text(encoding="utf-8").splitlines(),
                 ["10.2300/scope.notice", "10.2300/scope.pubmed"],
             )
+            notice_only_path = root / "artifacts" / "openalex_scope_allowlist_notice_only.txt"
+            notice_only = build_openalex_scope_allowlist(
+                snapshot_id="snapshot_early_scope",
+                root_dir=root,
+                output_path=notice_only_path,
+                include_pubmed=False,
+            )
+            self.assertEqual(notice_only["doi_count"], 1)
+            self.assertEqual(notice_only_path.read_text(encoding="utf-8").strip(), "10.2300/scope.notice")
 
             original_filter = os.environ.get("LSIB_OPENALEX_EARLY_SCOPE_FILTER")
             original_allowlist = os.environ.get("LSIB_OPENALEX_SCOPE_DOI_ALLOWLIST")

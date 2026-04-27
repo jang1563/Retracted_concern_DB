@@ -354,6 +354,7 @@ def build_openalex_scope_allowlist(
     snapshot_id: str,
     output_path: Path,
     root_dir: Optional[Path] = None,
+    include_pubmed: bool = True,
 ) -> Dict[str, object]:
     """Build DOI allowlist from non-OpenAlex sources before OpenAlex ingest.
 
@@ -371,7 +372,10 @@ def build_openalex_scope_allowlist(
 
     dois = set()
     doi_counts_by_collector = Counter()
-    for collector_name in (NOTICE_COLLECTOR, PUBMED_COLLECTOR):
+    collector_names = [NOTICE_COLLECTOR]
+    if include_pubmed:
+        collector_names.append(PUBMED_COLLECTOR)
+    for collector_name in collector_names:
         collector = get_collector(collector_name)
         files = collector.discover_files(Path(snapshot["raw_root"]), store, snapshot_id)
         for file_meta in files:
@@ -409,6 +413,7 @@ def build_openalex_scope_allowlist(
         "output_path": output_path,
         "doi_count": len(dois),
         "doi_counts_by_collector": dict(doi_counts_by_collector),
+        "include_pubmed": include_pubmed,
     }
 
 

@@ -223,6 +223,11 @@ def main(argv=None):
     allowlist = subparsers.add_parser("build-openalex-scope-allowlist")
     allowlist.add_argument("--snapshot-id", required=True)
     allowlist.add_argument("--output-path", required=True)
+    allowlist.add_argument(
+        "--skip-pubmed",
+        action="store_true",
+        help="Build the OpenAlex scope allowlist from official notices only.",
+    )
 
     materialize = subparsers.add_parser("materialize-canonical")
     materialize.add_argument("--snapshot-id", required=True)
@@ -336,10 +341,12 @@ def main(argv=None):
             snapshot_id=args.snapshot_id,
             output_path=Path(args.output_path),
             root_dir=root_dir,
+            include_pubmed=not args.skip_pubmed,
         )
         print("snapshot_id:", result["snapshot_id"])
         print("output_path:", result["output_path"])
         print("doi_count:", result["doi_count"])
+        print("include_pubmed:", result["include_pubmed"])
         return
 
     if args.command == "materialize-canonical":
