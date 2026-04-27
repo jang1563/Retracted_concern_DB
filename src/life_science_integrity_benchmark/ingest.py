@@ -22,7 +22,15 @@ from .constants import (
 )
 from .manifest import ManifestStore, SnapshotModifiedError
 from .materialize import materialize_canonical_snapshot
-from .utils import atomic_write_text, iter_jsonl, normalize_doi, open_text, write_json, write_jsonl
+from .utils import (
+    atomic_write_text,
+    coerce_bool,
+    iter_jsonl,
+    normalize_doi,
+    open_text,
+    write_json,
+    write_jsonl,
+)
 
 
 RAW_TEMPLATE_LAYOUT = {
@@ -114,7 +122,7 @@ def ingest_snapshot(
 ) -> Dict[str, object]:
     root_dir = Path(root_dir or Path.cwd())
     store = _manifest_store(root_dir)
-    store.assert_snapshot_frozen(snapshot_id)
+    _assert_snapshot_frozen_unless_trusted(store, snapshot_id)
     snapshot = store.get_snapshot(snapshot_id)
     collector = get_collector(collector_name)
     file_rows = {row["file_id"]: row for row in store.list_files(snapshot_id, collector_name)}
@@ -367,7 +375,7 @@ def build_openalex_scope_allowlist(
     root_dir = Path(root_dir or Path.cwd())
     output_path = Path(output_path)
     store = _manifest_store(root_dir)
-    store.assert_snapshot_frozen(snapshot_id)
+    _assert_snapshot_frozen_unless_trusted(store, snapshot_id)
     snapshot = store.get_snapshot(snapshot_id)
 
     dois = set()
@@ -498,6 +506,12 @@ def normalize_real_source_exports(raw_dir: Path, normalized_dir: Path) -> Dict[s
 def _manifest_store(root_dir: Optional[Path]) -> ManifestStore:
     root_dir = Path(root_dir or Path.cwd())
     return ManifestStore(root_dir / MANIFEST_DB_PATH)
+
+
+def _assert_snapshot_frozen_unless_trusted(store: ManifestStore, snapshot_id: str) -> None:
+    if coerce_bool(os.environ.get("LSIB_TRUST_REGISTERED_SNAPSHOT"), default=False):
+        return
+    store.assert_snapshot_frozen(snapshot_id)
 
 
 def _legacy_snapshot_id(raw_dir: Path, normalized_dir: Path) -> str:

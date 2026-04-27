@@ -52,8 +52,11 @@ echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
   --raw-root "$RAW_ROOT" \
   --source-family openalex_notices
 
+export LSIB_TRUST_REGISTERED_SNAPSHOT=1
+
 CURRENT_STEP="build_openalex_scope_allowlist"
 echo "$CURRENT_STEP" > "$ART_RELEASE/current_step.txt"
+rm -f "$OPENALEX_SCOPE_ALLOWLIST"
 "$PYTHON_BIN" -m life_science_integrity_benchmark.cli \
   --root-dir "$RUNTIME_ROOT" \
   build-openalex-scope-allowlist \

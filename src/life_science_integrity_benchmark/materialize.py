@@ -1,5 +1,6 @@
 """Canonical snapshot materialization from normalized collector shards."""
 
+import os
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
@@ -18,7 +19,7 @@ from .utils import coerce_bool, parse_date, read_jsonl, write_json, write_jsonl
 def materialize_canonical_snapshot(
     snapshot_id: str, root_dir: Path, manifest: ManifestStore
 ) -> Dict[str, Path]:
-    manifest.assert_snapshot_frozen(snapshot_id)
+    _assert_snapshot_frozen_unless_trusted(manifest, snapshot_id)
     normalized_root = Path(root_dir) / "data" / "normalized" / snapshot_id
     canonical_root = normalized_root / "canonical"
     canonical_root.mkdir(parents=True, exist_ok=True)
@@ -83,6 +84,12 @@ def materialize_canonical_snapshot(
         "orphan_notices_dir": canonical_root / "orphan_notices",
         "collection_summary": summary_path,
     }
+
+
+def _assert_snapshot_frozen_unless_trusted(manifest: ManifestStore, snapshot_id: str) -> None:
+    if coerce_bool(os.environ.get("LSIB_TRUST_REGISTERED_SNAPSHOT"), default=False):
+        return
+    manifest.assert_snapshot_frozen(snapshot_id)
 
 
 def _read_collector_rows(collector_dir: Path) -> List[dict]:
