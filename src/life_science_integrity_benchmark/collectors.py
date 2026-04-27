@@ -149,6 +149,11 @@ class OpenAlexBulkCollector(BaseCollector):
 
         doi = _extract_openalex_doi(row)
         if not doi:
+            if self.early_scope_filter:
+                return _scope_skip(
+                    line_number=context["line_number"],
+                    reason="missing_doi",
+                )
             return _quarantine(
                 line_number=context["line_number"],
                 error_code="missing_doi",

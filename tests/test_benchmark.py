@@ -1284,6 +1284,14 @@ class BenchmarkTests(unittest.TestCase):
                         },
                         "authorships": [],
                     },
+                    {
+                        "title": "DOI-less OpenAlex work",
+                        "abstract": "Rows without DOI cannot enter canonical benchmark input.",
+                        "publication_date": "2024-05-15",
+                        "type": "article",
+                        "concepts": [{"display_name": "Genetics", "score": 0.92}],
+                        "authorships": [],
+                    },
                 ],
             )
             write_jsonl(
@@ -1361,14 +1369,14 @@ class BenchmarkTests(unittest.TestCase):
 
             self.assertEqual(ingest_result["normalized_rows"], 3)
             self.assertEqual(ingest_result["quarantined_rows"], 0)
-            self.assertEqual(ingest_result["scope_skipped_rows"], 1)
+            self.assertEqual(ingest_result["scope_skipped_rows"], 2)
             store = ManifestStore(root / "data" / "manifests" / "ingest.sqlite3")
             scope_artifacts = store.list_artifacts(
                 "snapshot_early_scope",
                 "scope_skipped_openalex_bulk",
             )
             self.assertEqual(len(scope_artifacts), 1)
-            self.assertEqual(int(scope_artifacts[0]["row_count"]), 1)
+            self.assertEqual(int(scope_artifacts[0]["row_count"]), 2)
 
             ingest_snapshot("snapshot_early_scope", "local_notice_export", root_dir=root)
             paths = materialize_canonical_snapshot(
@@ -1377,7 +1385,7 @@ class BenchmarkTests(unittest.TestCase):
                 manifest=store,
             )
             summary = read_json(paths["collection_summary"])
-            self.assertEqual(summary["scope_skipped_rows_by_collector"]["openalex_bulk"], 1)
+            self.assertEqual(summary["scope_skipped_rows_by_collector"]["openalex_bulk"], 2)
             canonical_articles = read_jsonl(paths["articles_dir"] / "part-00000.jsonl.gz")
             self.assertEqual(
                 {row["doi"] for row in canonical_articles},
