@@ -39,3 +39,6 @@ artifacts/
 # Logs
 *.log
 logs/
+
+# Internal handoff notes, not published
+handoff_*_codex.md
